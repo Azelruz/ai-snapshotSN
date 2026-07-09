@@ -91,6 +91,12 @@ export async function POST(request: Request) {
         const randomSeed = Math.floor(Math.random() * 1000000);
         const pollinationsUrl = `https://image.pollinations.ai/p/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&seed=${randomSeed}&nologo=true`;
 
+        // สั่งดึงไฟล์รูปภาพใน Background Worker ก่อน เพื่อรอให้ AI เจนเสร็จและแคชไว้บน CDN
+        const aiResponse = await fetch(pollinationsUrl);
+        if (!aiResponse.ok) {
+          throw new Error(`Pollinations AI generation failed with status: ${aiResponse.status}`);
+        }
+
         // ทำการอัปเดตรูปภาพที่สร้างเสร็จแล้วและปรับสถานะเป็น 'completed'
         await db.update(images)
           .set({
