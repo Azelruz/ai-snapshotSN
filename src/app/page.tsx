@@ -1,203 +1,408 @@
 "use client";
 
+import { useState, useEffect, useRef } from "react";
+
 export default function Home() {
   const gold = "#D4AF37";
-  const goldLight = "rgba(212,175,55,0.12)";
   const darkBg = "#0a0a0a";
-  const softGray = "#f5f5f7";
-  const borderColor = "rgba(0,0,0,0.08)";
+  const surface = "#161616";
+  const surfaceHover = "#1e1e1e";
+  const textGray = "#999999";
+  const borderColor = "rgba(212,175,55,0.15)";
+
+  // UI States
+  const [selectedTheme, setSelectedTheme] = useState("cyberpunk");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [imageId, setImageId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // File Upload States
+  const [previewFile, setPreviewFile] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Themes Config
+  const themes = [
+    { id: "cyberpunk", name: "Cyberpunk", emoji: "🤖", desc: "แสงสีนีออนและไซเบอร์เนติกส์แห่งอนาคต" },
+    { id: "pixar", name: "Pixar 3D", emoji: "🧸", desc: "ลายเส้นการ์ตูน 3 มิติแสนน่ารัก อบอุ่น" },
+    { id: "wedding", name: "Royal Wedding", emoji: "👑", desc: "ธีมงานแต่งงานสุดหรูหราอลังการ" },
+    { id: "anime", name: "Fantasy Anime", emoji: "✨", desc: "ลายเส้นการ์ตูนญี่ปุ่นแฟนตาซี" },
+    { id: "luxury", name: "Luxury Gold", emoji: "⚜️", desc: "สไตล์โมเดลแฟชั่นโทนทอง-ดำพรีเมียม" },
+  ];
+
+  // Steps for loading simulation
+  const loadingSteps = [
+    "ตรวจจับองค์ประกอบใบหน้าและพื้นหลัง...",
+    "สร้าง Prompts และส่งข้อมูลเข้าประมวลผลระบบ AI...",
+    "แต่งเติมรายละเอียดขั้นสุดท้ายและเตรียมลิงก์รูปภาพ...",
+  ];
+
+  // Simulating loading steps progression while polling
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isGenerating && currentStep < loadingSteps.length - 1) {
+      interval = setInterval(() => {
+        setCurrentStep((prev) => Math.min(prev + 1, loadingSteps.length - 1));
+      }, 1800);
+    }
+    return () => clearInterval(interval);
+  }, [isGenerating, currentStep]);
+
+  // Polling database status
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isGenerating && imageId) {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/status?id=${imageId}`);
+          const data = await res.json();
+          
+          if (data.success) {
+            setStatus(data.status);
+            if (data.status === "completed" && data.imageUrl) {
+              setResultUrl(data.imageUrl);
+              setQrCodeUrl(data.qrCode);
+              setIsGenerating(false);
+              clearInterval(interval);
+            } else if (data.status === "failed") {
+              setErrorMsg("AI Generation failed. Please try again.");
+              setIsGenerating(false);
+              clearInterval(interval);
+            }
+          }
+        } catch (e) {
+          console.error("Error checking status:", e);
+        }
+      }, 1500);
+    }
+    return () => clearInterval(interval);
+  }, [isGenerating, imageId]);
+
+  // Triggering Generation
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    setCurrentStep(0);
+    setErrorMsg(null);
+    setResultUrl(null);
+    setQrCodeUrl(null);
+    setStatus("pending");
+
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          themeName: selectedTheme,
+          promptText: "a high quality portrait photo of a guest"
+        }),
+      });
+      const data = await response.json();
+
+      if (data.success && data.imageId) {
+        setImageId(data.imageId);
+      } else {
+        setErrorMsg(data.error || "Failed to start AI generation");
+        setIsGenerating(false);
+      }
+    } catch (e) {
+      setErrorMsg("Connection error. Could not reach server.");
+      setIsGenerating(false);
+    }
+  };
+
+  const triggerUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreviewFile(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "Inter, sans-serif", background: "#fafafa" }}>
-
-      {/* Navigation */}
+    <div style={{
+      minHeight: "100vh", display: "flex", flexDirection: "column",
+      background: darkBg, color: "#ffffff", fontFamily: "system-ui, -apple-system, sans-serif",
+      boxSizing: "border-box", margin: 0, padding: 0
+    }}>
+      {/* Header */}
       <header style={{
-        width: "100%", padding: "20px 40px", display: "flex",
-        justifyContent: "space-between", alignItems: "center",
-        borderBottom: `1px solid ${borderColor}`, background: "rgba(255,255,255,0.85)",
-        backdropFilter: "blur(12px)", position: "sticky", top: 0, zIndex: 100,
-        boxSizing: "border-box",
+        padding: "20px 40px", display: "flex", justifyContent: "space-between",
+        alignItems: "center", borderBottom: `1px solid ${borderColor}`,
+        background: "rgba(22, 22, 22, 0.8)", backdropFilter: "blur(12px)",
+        position: "sticky", top: 0, zIndex: 10
       }}>
-        <div style={{ fontWeight: 800, fontSize: 22, letterSpacing: "-0.04em", color: darkBg }}>
+        <div style={{ fontWeight: 800, fontSize: 24, letterSpacing: "-0.04em" }}>
           AI<span style={{ color: gold }}>SNAP</span>
         </div>
-        <nav style={{ display: "flex", gap: 32, fontSize: 14, fontWeight: 500, color: "#555" }}>
-          {["Features", "Themes", "Pricing"].map(item => (
-            <a key={item} href={`#${item.toLowerCase()}`}
-              style={{ color: "#555", textDecoration: "none", transition: "color 0.2s" }}
-              onMouseEnter={e => (e.currentTarget.style.color = gold)}
-              onMouseLeave={e => (e.currentTarget.style.color = "#555")}>
-              {item}
-            </a>
-          ))}
-        </nav>
-        <a href="#demo" style={{
-          background: darkBg, color: "#fff", padding: "10px 24px",
-          borderRadius: 50, fontSize: 14, fontWeight: 600, textDecoration: "none",
-          transition: "background 0.2s, transform 0.1s",
-        }}
-          onMouseEnter={e => { e.currentTarget.style.background = gold; e.currentTarget.style.transform = "scale(0.97)"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = darkBg; e.currentTarget.style.transform = "scale(1)"; }}>
-          Book Demo
-        </a>
+        <div style={{
+          background: "rgba(212,175,55,0.1)", border: `1px solid ${gold}`,
+          color: gold, borderRadius: 50, padding: "6px 16px", fontSize: 13,
+          fontWeight: 600, display: "flex", alignItems: "center", gap: 6
+        }}>
+          <span>●</span> D1 Cloud Connection Active
+        </div>
       </header>
 
-      {/* Hero Section */}
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "100px 24px", position: "relative", overflow: "hidden" }}>
-        {/* Glow */}
-        <div style={{
-          position: "absolute", top: "50%", left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: 700, height: 700,
-          background: `radial-gradient(circle, rgba(212,175,55,0.15) 0%, transparent 70%)`,
-          pointerEvents: "none", borderRadius: "50%",
-        }} />
-
-        {/* Badge */}
-        <div style={{
-          display: "inline-flex", alignItems: "center", gap: 8,
-          background: goldLight, border: `1px solid rgba(212,175,55,0.3)`,
-          borderRadius: 50, padding: "6px 18px", fontSize: 13, fontWeight: 600,
-          color: "#8B6914", marginBottom: 28, zIndex: 1,
-        }}>
-          ✨ AI-Powered Photobooth Platform
+      {/* Main Content */}
+      <main style={{
+        flex: 1, display: "flex", flexDirection: "column",
+        maxWidth: 1200, width: "100%", margin: "0 auto", padding: "40px 20px",
+        boxSizing: "border-box"
+      }}>
+        {/* Title */}
+        <div style={{ textAlign: "center", marginBottom: 40 }}>
+          <h1 style={{ fontSize: "clamp(28px, 4vw, 40px)", fontWeight: 800, margin: "0 0 10px", letterSpacing: "-0.02em" }}>
+            AI Photobooth <span style={{ color: gold }}>Playground</span>
+          </h1>
+          <p style={{ color: textGray, fontSize: 16, margin: 0 }}>
+            ทดลองจำลองระบบถ่ายภาพ เลือกธีม AI และสั่งสร้างรูปภาพแบบประมวลผลเบื้องหลัง (Async)
+          </p>
         </div>
 
-        {/* H1 */}
-        <h1 style={{
-          fontSize: "clamp(36px, 6vw, 72px)", fontWeight: 800,
-          lineHeight: 1.1, letterSpacing: "-0.03em", maxWidth: 800,
-          color: darkBg, margin: "0 0 24px", zIndex: 1,
+        {/* Demo Core Grid */}
+        <div style={{
+          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 32, alignItems: "start"
         }}>
-          The Ultimate{" "}
-          <span style={{ color: gold }}>AI Photobooth</span>
-          {" "}Experience.
-        </h1>
+          {/* Left Column: Input Panel */}
+          <div style={{
+            background: surface, borderRadius: 28, padding: 32,
+            border: `1px solid ${borderColor}`, display: "flex", flexDirection: "column", gap: 28
+          }}>
+            {/* Input 1: Take/Upload Photo */}
+            <div>
+              <label style={{ display: "block", fontSize: 15, fontWeight: 700, marginBottom: 12, color: gold }}>
+                1. ถ่ายภาพหรืออัปโหลดรูปภาพใบหน้า
+              </label>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                accept="image/*" 
+                style={{ display: "none" }} 
+              />
+              
+              <div 
+                onClick={triggerUpload}
+                style={{
+                  height: 200, border: `2px dashed ${borderColor}`, borderRadius: 20,
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer", background: "rgba(0,0,0,0.2)", overflow: "hidden",
+                  transition: "background 0.2s"
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(212,175,55,0.05)"}
+                onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.2)"}
+              >
+                {previewFile ? (
+                  <img src={previewFile} alt="Preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <div style={{ textAlign: "center", padding: 20 }}>
+                    <div style={{ fontSize: 40, marginBottom: 12 }}>📸</div>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>คลิกเพื่อจำลองการอัปโหลดรูปถ่าย</div>
+                    <div style={{ fontSize: 12, color: textGray, marginTop: 4 }}>หรือระบบจะใช้รูปจำลองให้ทันที</div>
+                  </div>
+                )}
+              </div>
+            </div>
 
-        {/* Subtitle */}
-        <p style={{
-          fontSize: "clamp(16px, 2vw, 20px)", color: "#666", maxWidth: 560,
-          lineHeight: 1.7, margin: "0 0 48px", fontWeight: 400, zIndex: 1,
-        }}>
-          Transform your events with world-class AI imaging. Instantly generate stunning, premium avatars for your guests.
-        </p>
+            {/* Input 2: Choose AI Theme */}
+            <div>
+              <label style={{ display: "block", fontSize: 15, fontWeight: 700, marginBottom: 12, color: gold }}>
+                2. เลือกธีมภาพ AI สำหรับตู้ของคุณ
+              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {themes.map(t => (
+                  <div
+                    key={t.id}
+                    onClick={() => setSelectedTheme(t.id)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 14, padding: "14px 20px",
+                      borderRadius: 16, background: selectedTheme === t.id ? "rgba(212,175,55,0.15)" : "rgba(0,0,0,0.15)",
+                      border: `1px solid ${selectedTheme === t.id ? gold : "transparent"}`,
+                      cursor: "pointer", transition: "all 0.2s"
+                    }}
+                    onMouseEnter={e => {
+                      if (selectedTheme !== t.id) e.currentTarget.style.background = surfaceHover;
+                    }}
+                    onMouseLeave={e => {
+                      if (selectedTheme !== t.id) e.currentTarget.style.background = "rgba(0,0,0,0.15)";
+                    }}
+                  >
+                    <span style={{ fontSize: 24 }}>{t.emoji}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: selectedTheme === t.id ? gold : "#fff" }}>{t.name}</div>
+                      <div style={{ fontSize: 12, color: textGray }}>{t.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-        {/* CTA Buttons */}
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center", zIndex: 1 }}>
-          <a href="#start" style={{
-            background: gold, color: "#fff", padding: "16px 40px",
-            borderRadius: 50, fontSize: 16, fontWeight: 700, textDecoration: "none",
-            boxShadow: "0 12px 40px rgba(212,175,55,0.35)",
-            transition: "transform 0.15s, box-shadow 0.15s",
-          }}
-            onMouseEnter={e => { e.currentTarget.style.transform = "scale(0.97)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(212,175,55,0.3)"; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "0 12px 40px rgba(212,175,55,0.35)"; }}>
-            Get Started →
-          </a>
-          <a href="#gallery" style={{
-            background: "#fff", color: darkBg, padding: "16px 40px",
-            borderRadius: 50, fontSize: 16, fontWeight: 600, textDecoration: "none",
-            border: `1px solid ${borderColor}`, boxShadow: "0 4px 16px rgba(0,0,0,0.06)",
-            transition: "transform 0.15s",
-          }}
-            onMouseEnter={e => e.currentTarget.style.transform = "scale(0.97)"}
-            onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
-            View Gallery
-          </a>
+            {/* Submit Button */}
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating}
+              style={{
+                width: "100%", padding: "18px 0", borderRadius: 50, background: gold,
+                color: darkBg, fontWeight: 800, fontSize: 16, border: "none",
+                cursor: isGenerating ? "not-allowed" : "pointer", opacity: isGenerating ? 0.6 : 1,
+                boxShadow: `0 10px 30px rgba(212,175,55,0.25)`, transition: "transform 0.1s"
+              }}
+              onMouseDown={e => { if(!isGenerating) e.currentTarget.style.transform = "scale(0.98)" }}
+              onMouseUp={e => { if(!isGenerating) e.currentTarget.style.transform = "scale(1)" }}
+            >
+              {isGenerating ? "ระบบ AI กำลังประมวลผล..." : "🚀 สั่งเจนรูป AI SNAP"}
+            </button>
+          </div>
+
+          {/* Right Column: Preview Panel */}
+          <div style={{
+            background: surface, borderRadius: 28, padding: 32,
+            border: `1px solid ${borderColor}`, minHeight: 450,
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            position: "relative"
+          }}>
+            {isGenerating ? (
+              /* Loading UI */
+              <div style={{ textAlign: "center", padding: 20 }}>
+                {/* Spinner */}
+                <div style={{
+                  width: 60, height: 60, border: `4px solid rgba(212,175,55,0.1)`,
+                  borderTop: `4px solid ${gold}`, borderRadius: "50%",
+                  margin: "0 auto 24px", animation: "spin 1s linear infinite"
+                }} />
+                <style jsx global>{`
+                  @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                  }
+                `}</style>
+                <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 8px", color: gold }}>
+                  กำลังทำงานเบื้องหลัง (Async)
+                </h3>
+                <div style={{ fontSize: 14, color: "#fff", marginBottom: 6 }}>
+                  {loadingSteps[currentStep]}
+                </div>
+                <div style={{ fontSize: 12, color: textGray }}>
+                  ฐานข้อมูล D1 บันทึกสถานะ: <span style={{ color: "#FFB020", fontWeight: 600 }}>pending</span>
+                </div>
+              </div>
+            ) : resultUrl ? (
+              /* Completed Result UI */
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 20, color: gold }}>
+                  ✨ ได้รับรูปภาพจาก AI แล้ว!
+                </h3>
+                
+                {/* Main Image Container */}
+                <div style={{
+                  position: "relative", width: "100%", maxWidth: 380, borderRadius: 20,
+                  overflow: "hidden", border: `1px solid ${borderColor}`,
+                  boxShadow: "0 15px 40px rgba(0,0,0,0.5)"
+                }}>
+                  <img src={resultUrl} alt="AI Result" style={{ width: "100%", display: "block" }} />
+                  
+                  {/* Mock Frame Overlay (Luxury minimal border) */}
+                  <div style={{
+                    position: "absolute", top: 12, left: 12, right: 12, bottom: 12,
+                    border: `1.5px solid rgba(212,175,55,0.5)`, pointerEvents: "none",
+                    display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: 12
+                  }}>
+                    <div style={{
+                      color: "#fff", fontSize: 12, fontWeight: 700, letterSpacing: 2,
+                      textShadow: "0 2px 4px rgba(0,0,0,0.8)", textAlign: "center"
+                    }}>
+                      AI SNAP · LAUNCH
+                    </div>
+                  </div>
+                </div>
+
+                {/* Meta details */}
+                <div style={{
+                  display: "flex", gap: 24, width: "100%", maxWidth: 380,
+                  alignItems: "center", marginTop: 24, padding: "16px 20px",
+                  background: "rgba(0,0,0,0.3)", borderRadius: 16, border: `1px solid ${borderColor}`
+                }}>
+                  {/* QR Code Container */}
+                  <div style={{
+                    background: "#fff", padding: 6, borderRadius: 8,
+                    display: "flex", alignItems: "center", justifyContent: "center"
+                  }}>
+                    {/* Generates a simple QR using dynamic QR API helper */}
+                    <img 
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(qrCodeUrl || "")}`} 
+                      alt="QR Code" 
+                      style={{ width: 70, height: 70 }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: gold }}>สแกน QR Code ดาวน์โหลด</div>
+                    <div style={{ fontSize: 11, color: textGray, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      ID: {imageId}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#10B981", fontWeight: 600, marginTop: 2 }}>
+                      สถานะ D1: completed
+                    </div>
+                  </div>
+                </div>
+
+                {/* Print button mock */}
+                <button
+                  onClick={() => alert(`ส่งรูป ${imageId} เข้าคิวพิมพ์ขนาด 4x6 สำเร็จ!`)}
+                  style={{
+                    marginTop: 20, width: "100%", maxWidth: 380, padding: "12px 0",
+                    background: "transparent", color: "#fff", border: `1px solid ${gold}`,
+                    borderRadius: 50, cursor: "pointer", fontWeight: 600, fontSize: 14,
+                    transition: "all 0.2s"
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(212,175,55,0.1)" }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}
+                >
+                  🖨️ ทดสอบส่งคำสั่งพิมพ์รูป (Print Mock)
+                </button>
+              </div>
+            ) : errorMsg ? (
+              /* Error UI */
+              <div style={{ textAlign: "center", padding: 20 }}>
+                <div style={{ fontSize: 50, marginBottom: 16 }}>⚠️</div>
+                <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 8px", color: "#EF4444" }}>
+                  เกิดข้อผิดพลาด
+                </h3>
+                <p style={{ fontSize: 14, color: textGray, margin: 0 }}>{errorMsg}</p>
+              </div>
+            ) : (
+              /* Idle state */
+              <div style={{ textAlign: "center", padding: 20, color: textGray }}>
+                <div style={{ fontSize: 60, marginBottom: 20 }}>🎭</div>
+                <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 8px", color: "#fff" }}>
+                  หน้าจอพรีวิวผลลัพธ์
+                </h3>
+                <p style={{ fontSize: 14, maxWidth: 300, margin: 0, lineHeight: 1.6 }}>
+                  หลังจากคุณกดสั่งงาน แผงฝั่งซ้ายจะบันทึกข้อมูลและแสดงภาพความละเอียดสูงที่เจนสดจาก AI ฝั่งขวาตรงนี้ครับ
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </main>
 
-      {/* Features Section */}
-      <section id="features" style={{ padding: "80px 40px", background: softGray }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <h2 style={{ textAlign: "center", fontSize: "clamp(28px, 4vw, 48px)", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 16, color: darkBg }}>
-            Everything you need.
-          </h2>
-          <p style={{ textAlign: "center", color: "#666", fontSize: 18, marginBottom: 60 }}>
-            Built for events of every scale — from intimate weddings to massive festivals.
-          </p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 24 }}>
-            {[
-              { icon: "📸", title: "Smart Camera", desc: "AI-powered face detection and smart framing for perfect shots every time." },
-              { icon: "🎨", title: "100+ AI Themes", desc: "From Anime to Luxury, Royal to Cyberpunk — themes for every event." },
-              { icon: "⚡", title: "Instant Generation", desc: "AI generates stunning portrait art in under 15 seconds." },
-              { icon: "🖨️", title: "Instant Print", desc: "Supports multiple printer brands with auto-queue management." },
-              { icon: "📱", title: "QR Download", desc: "Secure QR codes for easy sharing to Instagram, TikTok, and more." },
-              { icon: "📊", title: "Live Analytics", desc: "Real-time dashboard tracking visitors, prints, and AI performance." },
-            ].map(f => (
-              <div key={f.title} style={{
-                background: "#fff", borderRadius: 24, padding: 32,
-                border: `1px solid ${borderColor}`,
-                boxShadow: "0 4px 24px rgba(0,0,0,0.04)",
-                transition: "transform 0.2s, box-shadow 0.2s",
-              }}
-                onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = "0 12px 40px rgba(0,0,0,0.1)"; }}
-                onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 4px 24px rgba(0,0,0,0.04)"; }}>
-                <div style={{ fontSize: 36, marginBottom: 16 }}>{f.icon}</div>
-                <h3 style={{ fontSize: 20, fontWeight: 700, color: darkBg, marginBottom: 8 }}>{f.title}</h3>
-                <p style={{ color: "#777", lineHeight: 1.6, fontSize: 15, margin: 0 }}>{f.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Pricing Section */}
-      <section id="pricing" style={{ padding: "80px 40px", background: "#fff" }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <h2 style={{ textAlign: "center", fontSize: "clamp(28px, 4vw, 48px)", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 16, color: darkBg }}>
-            Simple Pricing.
-          </h2>
-          <p style={{ textAlign: "center", color: "#666", fontSize: 18, marginBottom: 60 }}>No hidden fees. Pay for what you use.</p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 24, alignItems: "start" }}>
-            {[
-              { plan: "Starter", price: "Pay/Event", desc: "Perfect for freelancers & small events", features: ["500 images/event", "3 AI themes", "QR downloads", "Basic analytics"], highlight: false },
-              { plan: "Professional", price: "Custom/Month", desc: "For agencies & active organizers", features: ["Unlimited events", "All premium themes", "White-label (no watermark)", "Priority AI queue", "Full analytics"], highlight: true },
-              { plan: "Enterprise", price: "Contact Us", desc: "For brands, malls & large venues", features: ["Unlimited everything", "Custom AI model", "Dedicated server", "API access", "24/7 support"], highlight: false },
-            ].map(p => (
-              <div key={p.plan} style={{
-                background: p.highlight ? darkBg : "#fff",
-                color: p.highlight ? "#fff" : darkBg,
-                borderRadius: 24, padding: 36,
-                border: p.highlight ? `2px solid ${gold}` : `1px solid ${borderColor}`,
-                boxShadow: p.highlight ? `0 20px 60px rgba(0,0,0,0.2)` : "0 4px 24px rgba(0,0,0,0.04)",
-                transform: p.highlight ? "scale(1.04)" : "scale(1)",
-              }}>
-                {p.highlight && (
-                  <div style={{ background: gold, color: "#fff", borderRadius: 50, padding: "4px 14px", fontSize: 12, fontWeight: 700, display: "inline-block", marginBottom: 16 }}>
-                    MOST POPULAR
-                  </div>
-                )}
-                <h3 style={{ fontSize: 24, fontWeight: 800, margin: "0 0 4px" }}>{p.plan}</h3>
-                <div style={{ fontSize: 20, fontWeight: 700, color: gold, margin: "8px 0" }}>{p.price}</div>
-                <p style={{ fontSize: 14, color: p.highlight ? "#aaa" : "#888", marginBottom: 24 }}>{p.desc}</p>
-                <ul style={{ listStyle: "none", padding: 0, margin: "0 0 32px" }}>
-                  {p.features.map(f => (
-                    <li key={f} style={{ fontSize: 14, padding: "6px 0", borderBottom: `1px solid ${p.highlight ? "rgba(255,255,255,0.1)" : borderColor}`, display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ color: gold }}>✓</span> {f}
-                    </li>
-                  ))}
-                </ul>
-                <a href="#demo" style={{
-                  display: "block", textAlign: "center",
-                  background: p.highlight ? gold : darkBg,
-                  color: "#fff", padding: "14px 24px", borderRadius: 50,
-                  fontWeight: 700, fontSize: 15, textDecoration: "none",
-                }}>
-                  {p.plan === "Enterprise" ? "Contact Sales" : "Get Started"}
-                </a>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Footer */}
       <footer style={{
-        padding: "40px", textAlign: "center", fontSize: 14, color: "#999",
-        borderTop: `1px solid ${borderColor}`, background: softGray,
+        padding: "30px 40px", textAlign: "center", fontSize: 13, color: textGray,
+        borderTop: `1px solid ${borderColor}`, background: "rgba(22, 22, 22, 0.4)",
+        boxSizing: "border-box"
       }}>
-        © {new Date().getFullYear()} AI SNAP Platform · Built for world-class events
+        © {new Date().getFullYear()} AI SNAP Platform · พัฒนาด้วยเทคโนโลยี Cloudflare Edge & D1 Database
       </footer>
     </div>
   );

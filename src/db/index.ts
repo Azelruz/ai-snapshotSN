@@ -1,4 +1,5 @@
 import { drizzle } from 'drizzle-orm/d1';
+import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from './schema';
 
 export function getDb() {
@@ -6,5 +7,5 @@ export function getDb() {
   if (!process.env.DB) {
     throw new Error("Cloudflare D1 binding 'DB' is not configured or available.");
   }
-  return drizzle(process.env.DB as any, { schema });
+  return drizzle(process.env.DB as unknown as D1Database, { schema });
 }
