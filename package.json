@@ -13,6 +13,7 @@
     "cf:deploy": "opennextjs-cloudflare build && wrangler pages deploy"
   },
   "dependencies": {
+    "@auth/core": "^0.34.3",
     "@auth/drizzle-adapter": "^1.11.2",
     "drizzle-orm": "^0.45.2",
     "next": "16.2.10",
