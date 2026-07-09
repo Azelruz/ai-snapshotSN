@@ -1,8 +1,9 @@
 name = "ai-snapshot"
 compatibility_date = "2025-07-01"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = ".open-next/assets"
+# pages_build_output_dir = ".open-next/assets"
 main = ".open-next/worker.js"
+assets = { directory = ".open-next/assets" }
 
 [[d1_databases]]
 binding = "DB"

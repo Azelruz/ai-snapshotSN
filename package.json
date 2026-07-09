@@ -10,16 +10,16 @@
     "cf:build": "opennextjs-cloudflare build",
     "cf:dev": "opennextjs-cloudflare dev",
     "cf:preview": "opennextjs-cloudflare build && wrangler pages dev",
-    "cf:deploy": "opennextjs-cloudflare build && wrangler pages deploy"
+    "cf:deploy": "opennextjs-cloudflare build && npx wrangler deploy"
   },
   "dependencies": {
     "@auth/core": "^0.34.3",
     "@auth/drizzle-adapter": "^1.11.2",
     "drizzle-orm": "^0.45.2",
-    "next": "16.2.10",
+    "next": "^15.1.0",
     "next-auth": "^4.24.14",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260702.1",
