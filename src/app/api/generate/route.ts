@@ -128,10 +128,10 @@ export async function POST(request: Request) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              // lucataco/faceswap model version
-              version: "9a423cef2b2dee94f4b64f3c0c5b7db5c3b52f5f190e29b4b45ccdc04b4c73e0",
+              // codeplugtech/face-swap model version
+              version: "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
               input: {
-                target_image: targetImageUrl,
+                input_image: targetImageUrl,
                 swap_image: uploadedFaceUrl,
               },
             }),
