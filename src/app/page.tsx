@@ -1,3 +1,5 @@
+"use client";
+
 export default function Home() {
   const gold = "#D4AF37";
   const goldLight = "rgba(212,175,55,0.12)";
