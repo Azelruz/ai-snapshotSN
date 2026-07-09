@@ -9,3 +9,8 @@ assets = { directory = ".open-next/assets" }
 binding = "DB"
 database_name = "ai-snapshot-db"
 database_id = "bc436940-7205-4e6c-839f-3d16be96728b"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "ai-snapshot-storage"
+

@@ -96,7 +96,8 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           themeName: selectedTheme,
-          promptText: "a high quality portrait photo of a guest"
+          promptText: "a high quality portrait photo of a guest",
+          faceImageBase64: previewFile // ส่งภาพใบหน้าที่ผู้ใช้อัปโหลดไปสลับรูปจริง
         }),
       });
       const data = await response.json();
