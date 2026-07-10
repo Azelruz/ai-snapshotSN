@@ -81,12 +81,13 @@ export async function POST(request: Request) {
     }
 
     // รายการภาพต้นแบบของแต่ละธีมที่จะใช้สลับใบหน้าจริงเข้าไปใส่ (Target templates)
+    // จำเป็นต้องใช้รูปที่มีใบหน้ามนุษย์ชัดเจน หันหน้าตรง เพื่อให้โมเดล AI ตรวจจับและสลับหน้าได้
     const themeTemplates: Record<string, string> = {
-      cyberpunk: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1024", 
-      pixar: "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=1024", 
-      wedding: "https://images.unsplash.com/photo-1519741497674-611481863552?w=1024", 
-      anime: "https://images.unsplash.com/photo-1560942485-b2a11cc13456?w=1024", 
-      luxury: "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=1024", 
+      cyberpunk: "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=1024", // ภาพคนในชุดนีออนไซเบอร์พังก์ เห็นหน้าชัด
+      pixar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1024", // ภาพคนในสตูดิโอแสงนุ่ม สไตล์ดิสนีย์
+      wedding: "https://images.unsplash.com/photo-1583939003579-730e3918a45a?w=1024", // ภาพเจ้าสาวชุดแต่งงานหรู หน้าตรง ชัดเจน
+      anime: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1024", // ภาพคอสเพลย์การ์ตูนญี่ปุ่น หน้าตรง ชัดเจน
+      luxury: "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=1024", // ภาพนางแบบแฟชั่นพรีเมียมหรูหรา เห็นหน้าตรง
     };
 
     const selectedTheme = themeName.toLowerCase();
