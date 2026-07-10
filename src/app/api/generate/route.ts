@@ -5,9 +5,6 @@ import { eq } from "drizzle-orm";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { R2Bucket } from "@cloudflare/workers-types";
 
-// Helper to simulate delay
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
@@ -59,27 +56,15 @@ export async function POST(request: Request) {
       }
     }
 
-    // 3. กำหนดข้อมูลตั้งต้นและสร้าง Record สถานะ 'pending' ใน D1
     const imageId = `img_${Math.random().toString(36).substring(2, 11)}`;
     const requestUrl = new URL(request.url);
     const hostUrl = `${requestUrl.protocol}//${requestUrl.host}`;
     const qrCodeUrl = `${hostUrl}/download/${imageId}`;
 
-    await db.insert(images).values({
-      id: imageId,
-      eventId: eventId,
-      originalUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500", // Fallback URL
-      generatedUrl: "",
-      qrCode: qrCodeUrl,
-      status: "pending",
-      createdAt: new Date(),
-    });
-
-    // 4. บันทึกรูปต้นฉบับลง R2 (ถ้าส่งมาและ R2 พร้อมใช้งาน)
+    // 3. บันทึกรูปต้นฉบับลง R2 ก่อน เพื่อนำลิงก์ไปส่งให้ Replicate
     let uploadedFaceUrl = "";
     if (faceImageBase64 && bucket) {
       try {
-        // ลบ data URI prefix (เช่น data:image/jpeg;base64,) ออกเพื่อดึงเฉพาะข้อมูล Base64 จริง
         const base64Data = faceImageBase64.replace(/^data:image\/\w+;base64,/, "");
         const buffer = Buffer.from(base64Data, "base64");
         
@@ -89,109 +74,88 @@ export async function POST(request: Request) {
         });
         
         uploadedFaceUrl = `${hostUrl}/api/image/${fileKey}`;
-        
-        // อัปเดตลิงก์รูปภาพต้นฉบับใน D1
-        await db.update(images)
-          .set({ originalUrl: uploadedFaceUrl })
-          .where(eq(images.id, imageId));
-          
         console.log(`[R2 Upload] Successfully uploaded face photo to R2: ${uploadedFaceUrl}`);
       } catch (uploadError) {
         console.error("[R2 Upload] Error uploading photo to R2:", uploadError);
       }
     }
 
-    // 5. เตรียมฟังก์ชันทำงานเบื้องหลัง (Background Task) สำหรับยิงสั่งงาน AI ของจริง
-    const runBackgroundAi = async () => {
+    // รายการภาพต้นแบบของแต่ละธีมที่จะใช้สลับใบหน้าจริงเข้าไปใส่ (Target templates)
+    const themeTemplates: Record<string, string> = {
+      cyberpunk: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1024", 
+      pixar: "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=1024", 
+      wedding: "https://images.unsplash.com/photo-1519741497674-611481863552?w=1024", 
+      anime: "https://images.unsplash.com/photo-1560942485-b2a11cc13456?w=1024", 
+      luxury: "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=1024", 
+    };
+
+    const selectedTheme = themeName.toLowerCase();
+    const targetImageUrl = themeTemplates[selectedTheme] || themeTemplates.cyberpunk;
+
+    // 4. สั่งงานสลับใบหน้าจริงบน Replicate API แบบ Synchronous (สร้างงานประมวลผลด่วน)
+    let predictionId = "";
+    if (replicateToken && uploadedFaceUrl) {
       try {
-        // รายการภาพต้นแบบของแต่ละธีมที่จะใช้สลับใบหน้าจริงเข้าไปใส่ (Target templates)
-        const themeTemplates: Record<string, string> = {
-          cyberpunk: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1024", // Cyberpunk character style
-          pixar: "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=1024", // 3D cartoon style
-          wedding: "https://images.unsplash.com/photo-1519741497674-611481863552?w=1024", // Wedding suit/dress template
-          anime: "https://images.unsplash.com/photo-1560942485-b2a11cc13456?w=1024", // Anime template style
-          luxury: "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=1024", // Luxury model style
-        };
-
-        const selectedTheme = themeName.toLowerCase();
-        const targetImageUrl = themeTemplates[selectedTheme] || themeTemplates.cyberpunk;
-
-        // ตรวจสอบว่ามี Token และภาพใน R2 พร้อมใช้งานจริงหรือไม่
-        if (replicateToken && uploadedFaceUrl) {
-          console.log(`[AI Replicate] Starting real Face Swap using Replicate API...`);
-          
-          // เรียกใช้งาน Replicate API ในการสร้างการประมวลผล (Prediction)
-          const predictionResponse = await fetch("https://api.replicate.com/v1/predictions", {
-            method: "POST",
-            headers: {
-              "Authorization": `Token ${replicateToken}`,
-              "Content-Type": "application/json",
+        console.log(`[AI Replicate] Requesting face swap prediction creation on Replicate...`);
+        const predictionResponse = await fetch("https://api.replicate.com/v1/predictions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Token ${replicateToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            // codeplugtech/face-swap model version
+            version: "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
+            input: {
+              input_image: targetImageUrl,
+              swap_image: uploadedFaceUrl,
             },
-            body: JSON.stringify({
-              // codeplugtech/face-swap model version
-              version: "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
-              input: {
-                input_image: targetImageUrl,
-                swap_image: uploadedFaceUrl,
-              },
-            }),
-          });
+          }),
+        });
 
-          if (!predictionResponse.ok) {
-            const errBody = await predictionResponse.text();
-            throw new Error(`Replicate API returned error: ${predictionResponse.status} - ${errBody}`);
-          }
-
-          const prediction = await predictionResponse.json() as { id: string; status: string; output?: string | string[] };
-          const predictionId = prediction.id;
-          let predictionStatus = prediction.status;
-          let finalOutput: string | string[] | null = null;
-
+        if (predictionResponse.ok) {
+          const prediction = await predictionResponse.json() as { id: string; status: string };
+          predictionId = prediction.id;
           console.log(`[AI Replicate] Prediction created successfully with ID: ${predictionId}`);
-
-          // ทำการสืบค้นสถานะ (Polling) จาก Replicate API เบื้องหลังจนกว่างานจะเสร็จ
-          let attempts = 0;
-          const maxAttempts = 30; // รอสูงสุด 30 วินาที
-          
-          while ((predictionStatus === "starting" || predictionStatus === "processing") && attempts < maxAttempts) {
-            await delay(1000);
-            attempts++;
-            
-            const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
-              headers: { "Authorization": `Token ${replicateToken}` },
-            });
-            
-            if (pollResponse.ok) {
-              const pollData = await pollResponse.json();
-              predictionStatus = pollData.status;
-              if (predictionStatus === "succeeded") {
-                finalOutput = pollData.output;
-                break;
-              } else if (predictionStatus === "failed") {
-                throw new Error("Replicate face swap model processing failed");
-              }
-            }
-          }
-
-          if (predictionStatus === "succeeded" && finalOutput) {
-            // อัปเดตตารางรูปใน D1 ด้วยภาพสลับใบหน้าจริงที่เสร็จสิ้น
-            await db.update(images)
-              .set({
-                generatedUrl: Array.isArray(finalOutput) ? finalOutput[0] : (finalOutput || ""),
-                status: "completed",
-              })
-              .where(eq(images.id, imageId));
-              
-            console.log(`[AI Replicate] Real Face Swap completed successfully for ${imageId}`);
-          } else {
-            throw new Error(`Replicate processing timeout or invalid status: ${predictionStatus}`);
-          }
-
         } else {
-          // --- FALLBACK MODE: ถ้าไม่มี API Token หรืออัปโหลดรูปไม่สำเร็จ ให้ถอยกลับไปใช้ของฟรี Pollinations.ai ---
-          console.log("[AI Fallback] No Replicate Token or R2 configuration found. Using Pollinations.ai fallback.");
-          await delay(4000);
+          const errBody = await predictionResponse.text();
+          console.error(`[AI Replicate] Error creating prediction: ${predictionResponse.status} - ${errBody}`);
+        }
+      } catch (err) {
+        console.error(`[AI Replicate] Exception during prediction request:`, err);
+      }
+    }
 
+    // 5. บันทึกข้อมูลลงฐานข้อมูล D1
+    if (predictionId) {
+      // เซฟ Prediction ID เก็บไว้ในช่อง generatedUrl ชั่วคราว (ขึ้นต้นด้วย replicate_pred_) เพื่อให้ฝั่งดึงสถานะสืบค้นต่อ
+      await db.insert(images).values({
+        id: imageId,
+        eventId: eventId,
+        originalUrl: uploadedFaceUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
+        generatedUrl: `replicate_pred_${predictionId}`,
+        qrCode: qrCodeUrl,
+        status: "pending",
+        createdAt: new Date(),
+      });
+      console.log(`[D1 Database] Saved pending image ${imageId} with prediction ID reference`);
+    } else {
+      // --- FALLBACK PATH: หากเรียก Replicate ไม่สำเร็จ ให้ใช้งานของฟรี Pollinations.ai ผ่าน Background Task ---
+      console.log("[AI Fallback] No Replicate prediction created. Falling back to Pollinations.ai...");
+      
+      await db.insert(images).values({
+        id: imageId,
+        eventId: eventId,
+        originalUrl: uploadedFaceUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
+        generatedUrl: "",
+        qrCode: qrCodeUrl,
+        status: "pending",
+        createdAt: new Date(),
+      });
+
+      // รันการดาวน์โหลดรูปภาพ Pollinations.ai ล่วงหน้าผ่าน waitUntil เพื่อไม่ให้ขัดจังหวะ response
+      const runPollinationsFallback = async () => {
+        try {
           const themePrompts: Record<string, string> = {
             cyberpunk: "cyberpunk avatar style, futuristic neon lights, dark synthwave background, high tech cybernetics, digital art",
             pixar: "cute 3D animated character, pixar disney style, vibrant colors, soft lighting, friendly expression, high quality render",
@@ -208,53 +172,44 @@ export async function POST(request: Request) {
           const randomSeed = Math.floor(Math.random() * 1000000);
           const pollinationsUrl = `https://image.pollinations.ai/p/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&seed=${randomSeed}&nologo=true`;
 
-          // เรียกทดลองดึงรูปให้เสร็จก่อนอัปเดตสถานะ
           const aiResponse = await fetch(pollinationsUrl);
-          if (!aiResponse.ok) {
-            throw new Error(`Pollinations AI generation failed with status: ${aiResponse.status}`);
+          if (aiResponse.ok) {
+            await db.update(images)
+              .set({
+                generatedUrl: pollinationsUrl,
+                status: "completed",
+              })
+              .where(eq(images.id, imageId));
+            console.log(`[AI Fallback] Successfully set Pollinations fallback URL for ${imageId}`);
+          } else {
+            throw new Error(`Pollinations API returned status: ${aiResponse.status}`);
           }
-
+        } catch (fallbackErr) {
+          console.error(`[AI Fallback Exception] Error:`, fallbackErr);
           await db.update(images)
-            .set({
-              generatedUrl: pollinationsUrl,
-              status: "completed",
-            })
-            .where(eq(images.id, imageId));
-            
-          console.log(`[AI Fallback] Generated fallback image successfully for ${imageId}`);
+            .set({ status: "failed" })
+            .where(eq(images.id, imageId))
+            .catch(console.error);
         }
+      };
 
-      } catch (bgError) {
-        console.error(`[AI Background Exception] Error:`, bgError);
-        
-        await db.update(images)
-          .set({ status: "failed" })
-          .where(eq(images.id, imageId))
-          .catch(console.error);
+      try {
+        if (context && context.ctx && typeof context.ctx.waitUntil === "function") {
+          context.ctx.waitUntil(runPollinationsFallback());
+        } else {
+          runPollinationsFallback();
+        }
+      } catch {
+        runPollinationsFallback();
       }
-    };
-
-    // 6. สั่งรันเบื้องหลัง
-    let hasWaitUntil = false;
-    try {
-      if (context && context.ctx && typeof context.ctx.waitUntil === "function") {
-        context.ctx.waitUntil(runBackgroundAi());
-        hasWaitUntil = true;
-      }
-    } catch {
-      // Local next dev
     }
 
-    if (!hasWaitUntil) {
-      runBackgroundAi();
-    }
-
-    // 7. ส่งตอบกลับด่วน
+    // 6. ส่งตอบกลับด่วนให้เบราว์เซอร์รับงานไปประมวลผลต่อ
     return NextResponse.json({
       success: true,
       imageId,
       status: "pending",
-      message: "AI face swap process started in the background",
+      message: "AI face swap process initialized",
     });
 
   } catch (error: unknown) {
