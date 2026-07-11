@@ -84,7 +84,7 @@ export async function POST(request: Request) {
     const themeTemplates: Record<string, string> = {
       cyberpunk: "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=1024", 
       pixar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1024", 
-      wedding: `${hostUrl}/templates/wedding_original.jpg`, // ใช้เทมเพลตรูปแต่งงานจริงของคุณ
+      wedding: `${hostUrl}/templates/wedding_original.jpg`, // ใช้รูปแต่งงานจริงของคุณ
       anime: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1024", 
       luxury: "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=1024", 
     };
@@ -93,43 +93,40 @@ export async function POST(request: Request) {
     const targetImageUrl = themeTemplates[selectedTheme] || themeTemplates.cyberpunk;
 
     let predictionId = "";
-    let isWeddingInpaint = false;
 
     // 4. สั่งเริ่มประมวลผลรูปภาพบน Replicate API แบบด่วน (Edge API Request)
     if (replicateToken && uploadedFaceUrl) {
       try {
         if (selectedTheme === "wedding") {
-          // --- ธีมแต่งงาน: ใช้ระบบ 2-Stage Pipeline (Stage 1: SDXL Inpaint วาดตัวแขกใหม่ทับเสื้อขาวเดิม) ---
-          isWeddingInpaint = true;
-          console.log(`[AI Wedding Inpaint] Requesting SDXL Inpaint creation on Replicate...`);
-          const inpaintResponse = await fetch("https://api.replicate.com/v1/predictions", {
+          // --- ธีมแต่งงาน: ใช้โมเดลพิเศษที่สามารถเจาะจงใบหน้า (Face Swap with Indexes) ---
+          // สลับใบหน้าของคุณลงเฉพาะ 'แขกผู้ชายเสื้อเชิ้ตสีขาวฝั่งซ้ายสุด' (Index 0) และปล่อยให้บ่าวสาวหน้าเดิม 100%
+          console.log(`[AI Wedding Index Swap] Requesting Targeted Face Swap on Replicate...`);
+          const predictionResponse = await fetch("https://api.replicate.com/v1/predictions", {
             method: "POST",
             headers: {
               "Authorization": `Token ${replicateToken}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              // sepal/sdxl-inpainting model version
-              version: "aca001c8b137114d5e594c68f7084ae6d82f364758aab8d997b233e8ef3c4d93",
+              // mertguvencli/face-swap-with-indexes model version
+              version: "518f2116425c40acb5c234031c55daf843c1357eff784370fe9489e57b65c150",
               input: {
-                image: targetImageUrl,
-                mask: `${hostUrl}/templates/wedding_mask.png`,
-                prompt: "a smiling wedding guest in a clean formal outfit, looking at the camera, photorealistic, highly detailed, realistic, 8k resolution",
-                negative_prompt: "ugly, deformed, blurry, bad anatomy, bad eyes, extra limbs, mutated hands, double head",
-                prompt_strength: 0.9,
-                num_inference_steps: 40,
-                guidance_scale: 7.5
+                source_face_image: uploadedFaceUrl,    // หน้าของผู้ใช้งาน
+                destination_image: targetImageUrl,     // รูปบ่าวสาวและแขกเสื้อขาว
+                source_face_index: 0,
+                destination_face_index: 0,              // ดัชนีหน้า 0 คือหน้าแขกที่อยู่ฝั่งซ้ายสุดของรูป
+                execution_type: "face_swap"
               },
             }),
           });
 
-          if (inpaintResponse.ok) {
-            const prediction = await inpaintResponse.json() as { id: string };
+          if (predictionResponse.ok) {
+            const prediction = await predictionResponse.json() as { id: string };
             predictionId = prediction.id;
-            console.log(`[AI Wedding Inpaint] SDXL Inpaint created successfully with ID: ${predictionId}`);
+            console.log(`[AI Wedding Index Swap] Prediction created with ID: ${predictionId}`);
           } else {
-            const errBody = await inpaintResponse.text();
-            console.error(`[AI Wedding Inpaint] Error creating Inpaint: ${inpaintResponse.status} - ${errBody}`);
+            const errBody = await predictionResponse.text();
+            console.error(`[AI Wedding Index Swap] Error: ${predictionResponse.status} - ${errBody}`);
           }
         } else {
           // --- ธีมอื่นๆ: ใช้การสลับหน้าตรงปกติ (Direct Face Swap) ---
@@ -165,17 +162,16 @@ export async function POST(request: Request) {
 
     // 5. บันทึกข้อมูลลงฐานข้อมูล D1
     if (predictionId) {
-      const predPrefix = isWeddingInpaint ? "replicate_inpaint_" : "replicate_pred_";
       await db.insert(images).values({
         id: imageId,
         eventId: eventId,
         originalUrl: uploadedFaceUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
-        generatedUrl: `${predPrefix}${predictionId}`,
+        generatedUrl: `replicate_pred_${predictionId}`,
         qrCode: qrCodeUrl,
         status: "pending",
         createdAt: new Date(),
       });
-      console.log(`[D1 Database] Saved pending image ${imageId} with prefix ${predPrefix}`);
+      console.log(`[D1 Database] Saved pending image ${imageId} referencing prediction ${predictionId}`);
     } else {
       // --- FALLBACK PATH: หากเรียก Replicate ไม่สำเร็จ ให้ใช้งานของฟรี Pollinations.ai ---
       console.log("[AI Fallback] No Replicate prediction created. Falling back to Pollinations.ai...");
