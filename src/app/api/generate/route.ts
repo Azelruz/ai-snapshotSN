@@ -11,7 +11,8 @@ function expandPrompt(theme: string, userText: string): string {
     cyberpunk: "cinematic film still of a futuristic cyberpunk character, glowing neon cybernetic implants, dark synthwave cityscape background, detailed skin texture, dramatic blue and pink volumetric lighting, shot on 85mm lens, f/1.8, award-winning digital art, photorealistic",
     pixar: "adorable 3D animated character in classic Pixar Disney style, soft warm studio lighting, highly detailed clay texture, vibrant friendly eyes, cheerful expression, 3D render, masterpiece, octane render, clean background",
     luxury: "high-fashion editorial portrait, luxury fashion model, elegant black and gold wardrobe, premium studio lighting, dark rich gold reflections, sophisticated mood, shot on Hasselblad, 8k resolution, cinematic, masterpiece",
-    anime: "modern anime key visual, beautiful anime character, sharp lines, glowing detailed eyes, dramatic cinematic lighting, fantasy cherry blossom background, digital illustration, masterpiece, high quality"
+    anime: "modern anime key visual, beautiful anime character, sharp lines, glowing detailed eyes, dramatic cinematic lighting, fantasy cherry blossom background, digital illustration, masterpiece, high quality",
+    wedding: "romantic royal wedding portrait of a beautiful bride and handsome groom, elegant formal wedding attire, soft golden hour sunlight, luxury gold accents, beautiful floral wedding ceremony background, shallow depth of field, shot on 85mm lens, f/1.4, photorealistic, cinematic, masterpiece"
   };
 
   const baseDetail = themeDetails[theme] || themeDetails.cyberpunk;
@@ -24,7 +25,7 @@ function expandPrompt(theme: string, userText: string): string {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { themeName = "Cyberpunk", promptText = "", faceImageBase64, weddingTarget = "groom" } = body;
+    const { themeName = "Cyberpunk", promptText = "", faceImageBase64 } = body;
 
     // 1. ดึง Cloudflare Context และ Bindings
     const context = getCloudflareContext();
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
     const hostUrl = `${requestUrl.protocol}//${requestUrl.host}`;
     const qrCodeUrl = `${hostUrl}/download/${imageId}`;
 
-    // 3. บันทึกรูปต้นฉบับลง R2 ก่อน เพื่อนำลิงก์ไปส่งให้ Replicate
+    // 3. บันทึกรูปต้นฉบับลง R2 (ถ้ามีการอัปโหลดรูปภาพใบหน้าเข้ามา)
     let uploadedFaceUrl = "";
     if (faceImageBase64 && bucket) {
       try {
@@ -97,95 +98,54 @@ export async function POST(request: Request) {
     }
 
     const selectedTheme = themeName.toLowerCase();
-    const targetImageUrl = `${hostUrl}/templates/wedding_original.jpg`;
     let predictionId = "";
-    let startPrefix = ""; // ระบุสถานะเริ่มต้นของ D1
 
-    // 4. สั่งเริ่มประมวลผลรูปภาพบน Replicate API
-    if (replicateToken && uploadedFaceUrl) {
+    // 4. เรียกใช้งานโมเดล gpt-image-2 บน Replicate เพื่อสร้างภาพโดยตรงจากข้อความ Prompt ทันที (ไม่ทำ Face Swap)
+    if (replicateToken) {
       try {
-        if (selectedTheme === "wedding") {
-          // --- ธีมแต่งงาน: ใช้ระบบ 2-Stage Pipeline (Stage 1: SDXL Inpaint วาดตัวแขกผู้ร่วมยินดีขึ้นมาใหม่) ---
-          console.log(`[AI Wedding Inpaint] Requesting SDXL Inpaint on Replicate...`);
-          const predictionResponse = await fetch("https://api.replicate.com/v1/predictions", {
-            method: "POST",
-            headers: {
-              "Authorization": `Token ${replicateToken}`,
-              "Content-Type": "application/json",
+        const detailedPrompt = expandPrompt(selectedTheme, promptText);
+        console.log(`[AI GPT Image 2] Creating image directly with prompt: "${detailedPrompt}"`);
+        
+        const predictionResponse = await fetch("https://api.replicate.com/v1/models/openai/gpt-image-2/predictions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Token ${replicateToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            input: {
+              prompt: detailedPrompt,
+              aspect_ratio: "1:1",
+              num_outputs: 1
             },
-            body: JSON.stringify({
-              version: "aca001c8b137114d5e594c68f7084ae6d82f364758aab8d997b233e8ef3c4d93",
-              input: {
-                image: targetImageUrl,
-                mask: `${hostUrl}/templates/wedding_mask.png`,
-                prompt: "a happy wedding guest smiling and celebrating, cheering for the bride and groom, formal wedding guest attire, looking at the camera, photorealistic, highly detailed, shot on 85mm lens, f/1.8, warm lighting",
-                negative_prompt: "deformed, ugly, bad anatomy, bad face, blurry, extra limbs, mutated hands, double head",
-                prompt_strength: 0.9,
-                num_inference_steps: 40,
-                guidance_scale: 8.0
-              },
-            }),
-          });
+          }),
+        });
 
-          if (predictionResponse.ok) {
-            const prediction = await predictionResponse.json() as { id: string };
-            predictionId = prediction.id;
-            startPrefix = "replicate_inpaint_"; // บันทึกสเตจแรกเพื่อนำส่งต่อไปสลับใบหน้าและจบที่ GFPGAN
-            console.log(`[AI Wedding Inpaint] SDXL Inpaint created with ID: ${predictionId}`);
-          } else {
-            const errBody = await predictionResponse.text();
-            console.error(`[AI Wedding Inpaint] Error: ${predictionResponse.status} - ${errBody}`);
-          }
+        if (predictionResponse.ok) {
+          const prediction = await predictionResponse.json() as { id: string };
+          predictionId = prediction.id;
+          console.log(`[AI GPT Image 2] Prediction created successfully with ID: ${predictionId}`);
         } else {
-          // --- ธีมทั่วไป: รัน Stage 1 (FLUX.1 Schnell) เพื่อเจนพื้นหลังคนใหม่ที่คมชัด สวยงาม ---
-          const detailedPrompt = expandPrompt(selectedTheme, promptText);
-          console.log(`[AI FLUX.1] Creating backdrop image with prompt: "${detailedPrompt}"`);
-          
-          const predictionResponse = await fetch("https://api.replicate.com/v1/predictions", {
-            method: "POST",
-            headers: {
-              "Authorization": `Token ${replicateToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              // black-forest-labs/flux-schnell model version
-              version: "f20dfaa77e6d9275e192c0211516e917dcb6546376abd2e088191295325881cf",
-              input: {
-                prompt: detailedPrompt,
-                aspect_ratio: "1:1",
-                num_outputs: 1,
-                output_format: "jpg"
-              },
-            }),
-          });
-
-          if (predictionResponse.ok) {
-            const prediction = await predictionResponse.json() as { id: string };
-            predictionId = prediction.id;
-            startPrefix = "replicate_flux_"; // ส่งไม้ต่อเข้ารันสเตจ FLUX ก่อน
-            console.log(`[AI FLUX.1] Prediction created successfully with ID: ${predictionId}`);
-          } else {
-            const errBody = await predictionResponse.text();
-            console.error(`[AI FLUX.1] Error creating prediction: ${predictionResponse.status} - ${errBody}`);
-          }
+          const errBody = await predictionResponse.text();
+          console.error(`[AI GPT Image 2] Error creating prediction: ${predictionResponse.status} - ${errBody}`);
         }
       } catch (err) {
         console.error(`[AI Replicate] Exception during prediction request:`, err);
       }
     }
 
-    // 5. บันทึกข้อมูลลงฐานข้อมูล D1
+    // 5. บันทึกข้อมูลลง D1 และรอพูลลิ่งผลลัพธ์ด่านเดียว (Single-Stage)
     if (predictionId) {
       await db.insert(images).values({
         id: imageId,
         eventId: eventId,
         originalUrl: uploadedFaceUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
-        generatedUrl: `${startPrefix}${predictionId}`,
+        generatedUrl: `replicate_pred_${predictionId}`, // ตั้งค่า Prefix ไปหาตัวพูลลิ่งด่านเดียวจบ
         qrCode: qrCodeUrl,
         status: "pending",
         createdAt: new Date(),
       });
-      console.log(`[D1 Database] Saved pending image ${imageId} referencing prediction ${startPrefix}${predictionId}`);
+      console.log(`[D1 Database] Saved pending image ${imageId} referencing prediction replicate_pred_${predictionId}`);
     } else {
       // --- FALLBACK PATH: หากเรียก Replicate ไม่สำเร็จ ให้ใช้งานของฟรี Pollinations.ai ---
       console.log("[AI Fallback] No Replicate prediction created. Falling back to Pollinations.ai...");
