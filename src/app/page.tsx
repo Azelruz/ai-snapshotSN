@@ -22,6 +22,7 @@ export default function Home() {
 
   // File Upload States
   const [previewFile, setPreviewFile] = useState<string | null>(null);
+  const [weddingTarget, setWeddingTarget] = useState<"groom" | "bride">("groom");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Themes Config
@@ -97,7 +98,8 @@ export default function Home() {
         body: JSON.stringify({
           themeName: selectedTheme,
           promptText: "a high quality portrait photo of a guest",
-          faceImageBase64: previewFile // ส่งภาพใบหน้าที่ผู้ใช้อัปโหลดไปสลับรูปจริง
+          faceImageBase64: previewFile, // ส่งภาพใบหน้าที่ผู้ใช้อัปโหลดไปสลับรูปจริง
+          weddingTarget: selectedTheme === "wedding" ? weddingTarget : undefined
         }),
       });
       const data = await response.json();
@@ -247,6 +249,44 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+              
+              {selectedTheme === "wedding" && (
+                <div style={{
+                  marginTop: 15, padding: "16px 20px", borderRadius: 16,
+                  background: "rgba(212,175,55,0.05)", border: `1px dashed ${borderColor}`,
+                  display: "flex", flexDirection: "column", gap: 10
+                }}>
+                  <label style={{ fontSize: 13, fontWeight: 700, color: gold }}>
+                    เลือกบทบาทที่จะสลับใบหน้าของคุณลงไป:
+                  </label>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button
+                      onClick={() => setWeddingTarget("groom")}
+                      style={{
+                        flex: 1, padding: "10px 0", borderRadius: 10,
+                        background: weddingTarget === "groom" ? gold : "rgba(0,0,0,0.2)",
+                        color: weddingTarget === "groom" ? darkBg : "#fff",
+                        border: `1px solid ${weddingTarget === "groom" ? gold : borderColor}`,
+                        fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.2s"
+                      }}
+                    >
+                      เจ้าบ่าว (Groom) 🤵
+                    </button>
+                    <button
+                      onClick={() => setWeddingTarget("bride")}
+                      style={{
+                        flex: 1, padding: "10px 0", borderRadius: 10,
+                        background: weddingTarget === "bride" ? gold : "rgba(0,0,0,0.2)",
+                        color: weddingTarget === "bride" ? darkBg : "#fff",
+                        border: `1px solid ${weddingTarget === "bride" ? gold : borderColor}`,
+                        fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.2s"
+                      }}
+                    >
+                      เจ้าสาว (Bride) 👰
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Submit Button */}

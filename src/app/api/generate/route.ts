@@ -24,7 +24,7 @@ function expandPrompt(theme: string, userText: string): string {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { themeName = "Cyberpunk", promptText = "", faceImageBase64 } = body;
+    const { themeName = "Cyberpunk", promptText = "", faceImageBase64, weddingTarget = "groom" } = body;
 
     // 1. ดึง Cloudflare Context และ Bindings
     const context = getCloudflareContext();
@@ -118,7 +118,7 @@ export async function POST(request: Request) {
                 source_face_image: uploadedFaceUrl,
                 destination_image: `${hostUrl}/templates/wedding_original.jpg`,
                 source_face_index: 0,
-                destination_face_index: 0,
+                destination_face_index: weddingTarget === "bride" ? 1 : 0,
                 execution_type: "face_swap"
               },
             }),
