@@ -30,61 +30,110 @@ export async function GET(request: Request) {
 
     const imageRecord = result[0];
 
-    // 2. หากยังอยู่ระหว่างการประมวลผล (pending) และมีข้อมูลอ้างอิงของ Replicate
-    if (imageRecord.status === "pending" && imageRecord.generatedUrl?.startsWith("replicate_pred_")) {
-      const predictionId = imageRecord.generatedUrl.replace("replicate_pred_", "");
-      
-      // ดึง Token ความปลอดภัยจากคลาวด์
-      const context = getCloudflareContext();
-      const env = (context?.env as Record<string, unknown>) || {};
-      const replicateToken = env.REPLICATE_API_TOKEN as string;
+    // ดึง Token ความปลอดภัยจากคลาวด์
+    const context = getCloudflareContext();
+    const env = (context?.env as Record<string, unknown>) || {};
+    const replicateToken = env.REPLICATE_API_TOKEN as string;
 
-      if (replicateToken) {
+    // 2. หากยังอยู่ระหว่างการประมวลผล (pending)
+    if (imageRecord.status === "pending") {
+      
+      // --- STAGE 1: เช็คสถานะการวาดตัวคนใหม่ทับแขกเดิม (Inpaint) ---
+      if (imageRecord.generatedUrl?.startsWith("replicate_inpaint_") && replicateToken) {
+        const inpaintPredId = imageRecord.generatedUrl.replace("replicate_inpaint_", "");
+        
         try {
-          console.log(`[Status API] Checking Replicate status for prediction: ${predictionId}`);
-          
-          const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
-            headers: {
-              "Authorization": `Token ${replicateToken}`,
-            },
+          console.log(`[Status API - Stage 1] Checking SDXL Inpaint status: ${inpaintPredId}`);
+          const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${inpaintPredId}`, {
+            headers: { "Authorization": `Token ${replicateToken}` },
           });
 
           if (pollResponse.ok) {
             const pollData = await pollResponse.json() as { status: string; output?: string | string[] };
             const currentStatus = pollData.status;
-
-            console.log(`[Status API] Replicate prediction ${predictionId} status is: ${currentStatus}`);
+            console.log(`[Status API - Stage 1] Inpaint prediction ${inpaintPredId} status: ${currentStatus}`);
 
             if (currentStatus === "succeeded" && pollData.output) {
-              const finalOutputUrl = Array.isArray(pollData.output) ? pollData.output[0] : pollData.output;
+              const inpaintedImageUrl = Array.isArray(pollData.output) ? pollData.output[0] : pollData.output;
+              console.log(`[Status API - Stage 1] Inpaint succeeded. Image URL: ${inpaintedImageUrl}`);
+
+              // --- ทริกเกอร์ต่อ STAGE 2: สั่งสลับใบหน้าจริง (Face Swap) ลงบนตัวละครที่ถูกวาดใหม่ ---
+              console.log(`[Status API - Stage 2] Initializing Face Swap on top of inpainted body...`);
+              const faceSwapResponse = await fetch("https://api.replicate.com/v1/predictions", {
+                method: "POST",
+                headers: {
+                  "Authorization": `Token ${replicateToken}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  version: "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
+                  input: {
+                    input_image: inpaintedImageUrl,
+                    swap_image: imageRecord.originalUrl,
+                  },
+                }),
+              });
+
+              if (faceSwapResponse.ok) {
+                const swapPred = await faceSwapResponse.json() as { id: string };
+                console.log(`[Status API - Stage 2] Face swap prediction created successfully with ID: ${swapPred.id}`);
+
+                // อัปเดตรหัสของ Stage 2 ลง D1 เพื่อให้การสืบค้นครั้งถัดไปมาเช็คที่ Stage 2
+                await db.update(images)
+                  .set({
+                    generatedUrl: `replicate_pred_${swapPred.id}`,
+                  })
+                  .where(eq(images.id, id));
+              } else {
+                const errText = await faceSwapResponse.text();
+                throw new Error(`Failed to start face swap stage: ${errText}`);
+              }
+            } else if (currentStatus === "failed" || currentStatus === "canceled") {
+              await db.update(images).set({ status: "failed" }).where(eq(images.id, id));
+              imageRecord.status = "failed";
+            }
+          }
+        } catch (inpaintError) {
+          console.error(`[Status API - Stage 1 Exception] Error:`, inpaintError);
+        }
+      }
+
+      // --- STAGE 2: เช็คสถานะการสลับใบหน้าจริง (Face Swap) ---
+      else if (imageRecord.generatedUrl?.startsWith("replicate_pred_") && replicateToken) {
+        const swapPredId = imageRecord.generatedUrl.replace("replicate_pred_", "");
+        
+        try {
+          console.log(`[Status API - Stage 2] Checking Face Swap status: ${swapPredId}`);
+          const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${swapPredId}`, {
+            headers: { "Authorization": `Token ${replicateToken}` },
+          });
+
+          if (pollResponse.ok) {
+            const pollData = await pollResponse.json() as { status: string; output?: string | string[] };
+            const currentStatus = pollData.status;
+            console.log(`[Status API - Stage 2] Face swap prediction ${swapPredId} status: ${currentStatus}`);
+
+            if (currentStatus === "succeeded" && pollData.output) {
+              const finalImageUrl = Array.isArray(pollData.output) ? pollData.output[0] : pollData.output;
               
-              // ทำการบันทึก URL รูปสลับหน้าจริงลงฐานข้อมูล D1
+              // เสร็จสิ้นกระบวนการทั้งหมด อัปเดตสถานะเป็น completed
               await db.update(images)
                 .set({
-                  generatedUrl: finalOutputUrl,
+                  generatedUrl: finalImageUrl,
                   status: "completed",
                 })
                 .where(eq(images.id, id));
               
-              console.log(`[Status API] D1 database updated: completed image ${id}`);
-              
-              // อัปเดตข้อมูลในตัวแปรสำหรับการส่งกลับ
+              console.log(`[Status API] Final face swap completed successfully for image ${id}`);
               imageRecord.status = "completed";
-              imageRecord.generatedUrl = finalOutputUrl;
+              imageRecord.generatedUrl = finalImageUrl;
             } else if (currentStatus === "failed" || currentStatus === "canceled") {
-              // ทำการอัปเดตฐานข้อมูล D1 เป็นล้มเหลว
-              await db.update(images)
-                .set({
-                  status: "failed",
-                })
-                .where(eq(images.id, id));
-              
-              console.log(`[Status API] D1 database updated: failed image ${id}`);
+              await db.update(images).set({ status: "failed" }).where(eq(images.id, id));
               imageRecord.status = "failed";
             }
           }
-        } catch (apiError) {
-          console.error(`[Status API Exception] Error contacting Replicate:`, apiError);
+        } catch (swapError) {
+          console.error(`[Status API - Stage 2 Exception] Error:`, swapError);
         }
       }
     }
@@ -92,8 +141,10 @@ export async function GET(request: Request) {
     // 3. ส่งข้อมูลสถานะปัจจุบันกลับไปแสดงผลหน้าจอ
     return NextResponse.json({
       success: true,
-      status: imageRecord.status, // 'pending', 'completed', 'failed'
-      imageUrl: imageRecord.generatedUrl?.startsWith("replicate_pred_") ? "" : imageRecord.generatedUrl,
+      status: imageRecord.status,
+      imageUrl: (imageRecord.generatedUrl?.startsWith("replicate_inpaint_") || imageRecord.generatedUrl?.startsWith("replicate_pred_")) 
+        ? "" 
+        : imageRecord.generatedUrl,
       qrCode: imageRecord.qrCode,
       createdAt: imageRecord.createdAt,
     });
