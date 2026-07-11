@@ -25,7 +25,7 @@ function getThemePrompt(theme: string, userText: string): string {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { themeName = "Cyberpunk", promptText = "", faceImageBase64 } = body;
+    const { themeName = "Cyberpunk", promptText = "", faceImageBase64, basePhotoUrl } = body;
 
     // 1. ดึง Cloudflare Context และ Bindings
     const context = getCloudflareContext();
@@ -109,19 +109,22 @@ export async function POST(request: Request) {
         const inputImages: string[] = [];
         let reqAspectRatio = "1:1";
 
-        if (selectedTheme === "wedding") {
-          // ธีมแต่งงาน: ใช้ 2 รูป [รูปพื้นหลังบ่าวสาว, รูปใบหน้าแขกที่อัปโหลดเข้ามา]
-          const targetImageUrl = `${hostUrl}/templates/wedding_original.jpg`;
-          inputImages.push(targetImageUrl);
-          if (uploadedFaceUrl) {
-            inputImages.push(uploadedFaceUrl);
-          }
-          reqAspectRatio = "3:2"; // กำหนดสัดส่วนตามรูปคู่แต่งงานเริ่มต้น
-        } else {
-          // ธีมทั่วไป: ใช้ 1 รูป [รูปใบหน้าผู้ใช้ที่อัปโหลดเข้ามา] เพื่อให้ AI เจนฉากใหม่ตามสไตล์โดยเลียนหน้าตาคุณ
-          if (uploadedFaceUrl) {
-            inputImages.push(uploadedFaceUrl);
-          }
+        // กำหนดรูปพื้นหลังเริ่มต้น (ดีฟอลต์เป็นรูปแต่งงานหากไม่ได้ระบุมา)
+        let resolvedBaseUrl = basePhotoUrl || `${hostUrl}/templates/wedding_original.jpg`;
+        if (resolvedBaseUrl.startsWith("/")) {
+          resolvedBaseUrl = `${hostUrl}${resolvedBaseUrl}`;
+        }
+        
+        inputImages.push(resolvedBaseUrl);
+
+        // ดึงรูปหน้าแขกที่อัปโหลด (ถ้ามี) เป็นรูปอ้างอิงใบหน้าที่สอง
+        if (uploadedFaceUrl) {
+          inputImages.push(uploadedFaceUrl);
+        }
+
+        // หากรูปพื้นหลังหลักเป็นรูปแต่งงาน กำหนดสัดส่วน 3:2 นอกนั้น 1:1
+        if (resolvedBaseUrl.includes("wedding")) {
+          reqAspectRatio = "3:2";
         }
 
         console.log(`[AI GPT Image 2] Generating image for theme ${selectedTheme}`);

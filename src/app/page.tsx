@@ -11,7 +11,8 @@ export default function Home() {
   const borderColor = "rgba(212,175,55,0.15)";
 
   // UI States
-  const [selectedTheme, setSelectedTheme] = useState("cyberpunk");
+  const [selectedBasePhoto, setSelectedBasePhoto] = useState("/templates/wedding_original.jpg");
+  const [selectedTheme, setSelectedTheme] = useState("wedding");
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [imageId, setImageId] = useState<string | null>(null);
@@ -24,20 +25,29 @@ export default function Home() {
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Base Photos Config
+  const basePhotos = [
+    { id: "wedding", name: "คู่บ่าวสาววิวาห์", url: "/templates/wedding_original.jpg" },
+    { id: "cyberpunk", name: "เมืองไซเบอร์", url: "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600" },
+    { id: "pixar", name: "ห้องของเล่น", url: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600" },
+    { id: "anime", name: "แฟนตาซีญี่ปุ่น", url: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600" },
+    { id: "luxury", name: "แฟชั่นสตูดิโอ", url: "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=600" }
+  ];
+
   // Themes Config
   const themes = [
-    { id: "cyberpunk", name: "Cyberpunk", emoji: "🤖", desc: "แสงสีนีออนและไซเบอร์เนติกส์แห่งอนาคต" },
+    { id: "wedding", name: "Royal Wedding", emoji: "👑", desc: "สไตล์งานวิวาห์ร่วมยินดีสุดคลาสสิก" },
+    { id: "cyberpunk", name: "Cyberpunk", emoji: "🤖", desc: "แสงสีนีออนและเทคโนโลยีไซเบอร์อนาคต" },
     { id: "pixar", name: "Pixar 3D", emoji: "🧸", desc: "ลายเส้นการ์ตูน 3 มิติแสนน่ารัก อบอุ่น" },
-    { id: "wedding", name: "Royal Wedding", emoji: "👑", desc: "ธีมงานแต่งงานสุดหรูหราอลังการ" },
-    { id: "anime", name: "Fantasy Anime", emoji: "✨", desc: "ลายเส้นการ์ตูนญี่ปุ่นแฟนตาซี" },
-    { id: "luxury", name: "Luxury Gold", emoji: "⚜️", desc: "สไตล์โมเดลแฟชั่นโทนทอง-ดำพรีเมียม" },
+    { id: "anime", name: "Fantasy Anime", emoji: "✨", desc: "ลายเส้นการ์ตูนญี่ปุ่นสุดอลังการ" },
+    { id: "luxury", name: "Luxury Gold", emoji: "⚜️", desc: "สไตล์แฟชั่นหรูหรา โทนทอง-ดำพรีเมียม" },
   ];
 
   // Steps for loading simulation
   const loadingSteps = [
-    "ตรวจจับองค์ประกอบใบหน้าและพื้นหลัง...",
-    "สร้าง Prompts และส่งข้อมูลเข้าประมวลผลระบบ AI...",
-    "แต่งเติมรายละเอียดขั้นสุดท้ายและเตรียมลิงก์รูปภาพ...",
+    "รับภาพพื้นฐานและประมวลผล R2 Storage...",
+    "ขยาย Prompts และเรียบเรียงโครงสร้างส่งต่อ Replicate...",
+    "ประมวลผลโมเดลเรือธง gpt-image-2 เพื่อสร้างสรรค์ภาพใหม่...",
   ];
 
   // Simulating loading steps progression while polling
@@ -46,7 +56,7 @@ export default function Home() {
     if (isGenerating && currentStep < loadingSteps.length - 1) {
       interval = setInterval(() => {
         setCurrentStep((prev) => Math.min(prev + 1, loadingSteps.length - 1));
-      }, 1800);
+      }, 2500);
     }
     return () => clearInterval(interval);
   }, [isGenerating, currentStep]);
@@ -97,7 +107,8 @@ export default function Home() {
         body: JSON.stringify({
           themeName: selectedTheme,
           promptText: "a high quality portrait photo of a guest",
-          faceImageBase64: previewFile // ส่งภาพใบหน้าที่ผู้ใช้อัปโหลดไปสลับรูปจริง
+          faceImageBase64: previewFile,
+          basePhotoUrl: selectedBasePhoto
         }),
       });
       const data = await response.json();
@@ -166,7 +177,7 @@ export default function Home() {
             AI Photobooth <span style={{ color: gold }}>Playground</span>
           </h1>
           <p style={{ color: textGray, fontSize: 16, margin: 0 }}>
-            ทดลองจำลองระบบถ่ายภาพ เลือกธีม AI และสั่งสร้างรูปภาพแบบประมวลผลเบื้องหลัง (Async)
+            จำลองกระบวนการสร้างสรรค์รูปภาพด้วยโมเดลเรือธงของ OpenAI (gpt-image-2) แบบเรียลไทม์
           </p>
         </div>
 
@@ -180,10 +191,53 @@ export default function Home() {
             background: surface, borderRadius: 28, padding: 32,
             border: `1px solid ${borderColor}`, display: "flex", flexDirection: "column", gap: 28
           }}>
-            {/* Input 1: Take/Upload Photo */}
+            
+            {/* ขั้นตอนที่ 1: เลือกรูปพื้นฐาน */}
             <div>
               <label style={{ display: "block", fontSize: 15, fontWeight: 700, marginBottom: 12, color: gold }}>
-                1. ถ่ายภาพหรืออัปโหลดรูปภาพใบหน้า
+                1. เลือกรูปพื้นฐานที่ต้องการใช้งาน
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+                {basePhotos.map(bp => {
+                  const isSelected = selectedBasePhoto === bp.url || (bp.id === "wedding" && selectedBasePhoto.includes("wedding"));
+                  return (
+                    <div
+                      key={bp.id}
+                      onClick={() => {
+                        setSelectedBasePhoto(bp.id === "wedding" ? "/templates/wedding_original.jpg" : bp.url);
+                        // อัปเดตธีมเริ่มต้นให้เข้าคู่เพื่อความลื่นไหล
+                        if (bp.id === "wedding") {
+                          setSelectedTheme("wedding");
+                        }
+                      }}
+                      style={{
+                        position: "relative", borderRadius: 12, overflow: "hidden", height: 70,
+                        border: `2px solid ${isSelected ? gold : "transparent"}`,
+                        cursor: "pointer", transition: "all 0.2s"
+                      }}
+                    >
+                      <img 
+                        src={bp.id === "wedding" ? "/templates/wedding_original.jpg" : bp.url} 
+                        alt={bp.name} 
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }} 
+                      />
+                      <div style={{
+                        position: "absolute", bottom: 0, left: 0, right: 0,
+                        background: "rgba(0,0,0,0.6)", padding: "2px 0", textAlign: "center",
+                        fontSize: 9, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden"
+                      }}>
+                        {bp.name}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ขั้นตอนที่ 2: อัปโหลดรูปภาพใบหน้า */}
+            <div>
+              <label style={{ display: "block", fontSize: 15, fontWeight: 700, marginBottom: 12, color: gold }}>
+                2. อัปโหลดรูปภาพของคุณเพื่อเพิ่มลงในรูปพื้นฐาน
               </label>
               <input 
                 type="file" 
@@ -196,7 +250,7 @@ export default function Home() {
               <div 
                 onClick={triggerUpload}
                 style={{
-                  height: 200, border: `2px dashed ${borderColor}`, borderRadius: 20,
+                  height: 160, border: `2px dashed ${borderColor}`, borderRadius: 20,
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                   cursor: "pointer", background: "rgba(0,0,0,0.2)", overflow: "hidden",
                   transition: "background 0.2s"
@@ -208,27 +262,27 @@ export default function Home() {
                   <img src={previewFile} alt="Preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 ) : (
                   <div style={{ textAlign: "center", padding: 20 }}>
-                    <div style={{ fontSize: 40, marginBottom: 12 }}>📸</div>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>คลิกเพื่อจำลองการอัปโหลดรูปถ่าย</div>
-                    <div style={{ fontSize: 12, color: textGray, marginTop: 4 }}>หรือระบบจะใช้รูปจำลองให้ทันที</div>
+                    <div style={{ fontSize: 32, marginBottom: 10 }}>📸</div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>คลิกเพื่อเลือกภาพใบหน้าของคุณ</div>
+                    <div style={{ fontSize: 11, color: textGray, marginTop: 4 }}>หน้าตรง มองกล้อง แสงชัดเจน</div>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Input 2: Choose AI Theme */}
+            {/* ขั้นตอนที่ 3: เลือกแนวภาพ/ธีม AI */}
             <div>
               <label style={{ display: "block", fontSize: 15, fontWeight: 700, marginBottom: 12, color: gold }}>
-                2. เลือกธีมภาพ AI สำหรับตู้ของคุณ
+                3. เลือกแนวภาพ / ธีม AI
               </label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {themes.map(t => (
                   <div
                     key={t.id}
                     onClick={() => setSelectedTheme(t.id)}
                     style={{
-                      display: "flex", alignItems: "center", gap: 14, padding: "14px 20px",
-                      borderRadius: 16, background: selectedTheme === t.id ? "rgba(212,175,55,0.15)" : "rgba(0,0,0,0.15)",
+                      display: "flex", alignItems: "center", gap: 12, padding: "10px 16px",
+                      borderRadius: 14, background: selectedTheme === t.id ? "rgba(212,175,55,0.15)" : "rgba(0,0,0,0.15)",
                       border: `1px solid ${selectedTheme === t.id ? gold : "transparent"}`,
                       cursor: "pointer", transition: "all 0.2s"
                     }}
@@ -239,31 +293,38 @@ export default function Home() {
                       if (selectedTheme !== t.id) e.currentTarget.style.background = "rgba(0,0,0,0.15)";
                     }}
                   >
-                    <span style={{ fontSize: 24 }}>{t.emoji}</span>
+                    <span style={{ fontSize: 20 }}>{t.emoji}</span>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: selectedTheme === t.id ? gold : "#fff" }}>{t.name}</div>
-                      <div style={{ fontSize: 12, color: textGray }}>{t.desc}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: selectedTheme === t.id ? gold : "#fff" }}>{t.name}</div>
+                      <div style={{ fontSize: 11, color: textGray }}>{t.desc}</div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Submit Button */}
+            {/* ขั้นตอนที่ 4: กดปุ่มสั่งเจนรูปภาพ */}
             <button
               onClick={handleGenerate}
-              disabled={isGenerating}
+              disabled={isGenerating || !previewFile}
               style={{
-                width: "100%", padding: "18px 0", borderRadius: 50, background: gold,
-                color: darkBg, fontWeight: 800, fontSize: 16, border: "none",
-                cursor: isGenerating ? "not-allowed" : "pointer", opacity: isGenerating ? 0.6 : 1,
-                boxShadow: `0 10px 30px rgba(212,175,55,0.25)`, transition: "transform 0.1s"
+                width: "100%", padding: "18px 0", borderRadius: 50, background: previewFile ? gold : "#555",
+                color: previewFile ? darkBg : "#aaa", fontWeight: 800, fontSize: 16, border: "none",
+                cursor: (isGenerating || !previewFile) ? "not-allowed" : "pointer", 
+                opacity: isGenerating ? 0.6 : 1,
+                boxShadow: previewFile ? `0 10px 30px rgba(212,175,55,0.25)` : "none", 
+                transition: "transform 0.1s"
               }}
-              onMouseDown={e => { if(!isGenerating) e.currentTarget.style.transform = "scale(0.98)" }}
-              onMouseUp={e => { if(!isGenerating) e.currentTarget.style.transform = "scale(1)" }}
+              onMouseDown={e => { if(!isGenerating && previewFile) e.currentTarget.style.transform = "scale(0.98)" }}
+              onMouseUp={e => { if(!isGenerating && previewFile) e.currentTarget.style.transform = "scale(1)" }}
             >
-              {isGenerating ? "ระบบ AI กำลังประมวลผล..." : "🚀 สั่งเจนรูป AI SNAP"}
+              {isGenerating ? "ระบบ AI กำลังประมวลผล..." : "🚀 4. สั่งเจนรูป AI SNAP"}
             </button>
+            {!previewFile && (
+              <div style={{ fontSize: 12, color: "#ff4d4d", textAlign: "center", marginTop: -15, fontWeight: 600 }}>
+                * กรุณาอัปโหลดรูปภาพของคุณก่อนสั่งประมวลผล
+              </div>
+            )}
           </div>
 
           {/* Right Column: Preview Panel */}
@@ -289,7 +350,7 @@ export default function Home() {
                   }
                 `}</style>
                 <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 8px", color: gold }}>
-                  กำลังทำงานเบื้องหลัง (Async)
+                  กำลังประมวลผลรูปภาพด่านเดียว (gpt-image-2)
                 </h3>
                 <div style={{ fontSize: 14, color: "#fff", marginBottom: 6 }}>
                   {loadingSteps[currentStep]}
@@ -299,98 +360,78 @@ export default function Home() {
                 </div>
               </div>
             ) : resultUrl ? (
-              /* Completed Result UI */
-              <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 20, color: gold }}>
-                  ✨ ได้รับรูปภาพจาก AI แล้ว!
+              /* Success / Result UI */
+              <div style={{ width: "100%", textAlign: "center" }}>
+                <h3 style={{ fontSize: 20, fontWeight: 800, color: gold, margin: "0 0 20px" }}>
+                  ✨ ได้รับรูปภาพ AI สำเร็จเรียบร้อย!
                 </h3>
                 
-                {/* Main Image Container */}
+                {/* Result Image */}
                 <div style={{
-                  position: "relative", width: "100%", maxWidth: 380, borderRadius: 20,
-                  overflow: "hidden", border: `1px solid ${borderColor}`,
-                  boxShadow: "0 15px 40px rgba(0,0,0,0.5)"
+                  maxWidth: "100%", borderRadius: 20, overflow: "hidden",
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.5)", border: `1px solid ${borderColor}`,
+                  marginBottom: 28, background: "#000"
                 }}>
-                  <img src={resultUrl} alt="AI Result" style={{ width: "100%", display: "block" }} />
-                  
-                  {/* Mock Frame Overlay (Luxury minimal border) */}
-                  <div style={{
-                    position: "absolute", top: 12, left: 12, right: 12, bottom: 12,
-                    border: `1.5px solid rgba(212,175,55,0.5)`, pointerEvents: "none",
-                    display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: 12
-                  }}>
-                    <div style={{
-                      color: "#fff", fontSize: 12, fontWeight: 700, letterSpacing: 2,
-                      textShadow: "0 2px 4px rgba(0,0,0,0.8)", textAlign: "center"
-                    }}>
-                      AI SNAP · LAUNCH
-                    </div>
-                  </div>
+                  <img src={resultUrl} alt="AI Snapshot Result" style={{ width: "100%", height: "auto", display: "block" }} />
                 </div>
 
-                {/* Meta details */}
+                {/* QR & Download options */}
                 <div style={{
-                  display: "flex", gap: 24, width: "100%", maxWidth: 380,
-                  alignItems: "center", marginTop: 24, padding: "16px 20px",
-                  background: "rgba(0,0,0,0.3)", borderRadius: 16, border: `1px solid ${borderColor}`
+                  display: "flex", flexWrap: "wrap", gap: 20, alignItems: "center",
+                  justifyContent: "center", background: "rgba(0,0,0,0.2)",
+                  padding: 24, borderRadius: 20, border: `1px solid ${borderColor}`
                 }}>
-                  {/* QR Code Container */}
-                  <div style={{
-                    background: "#fff", padding: 6, borderRadius: 8,
-                    display: "flex", alignItems: "center", justifyContent: "center"
-                  }}>
-                    {/* Generates a simple QR using dynamic QR API helper */}
-                    <img 
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(qrCodeUrl || "")}`} 
-                      alt="QR Code" 
-                      style={{ width: 70, height: 70 }}
-                    />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: gold }}>สแกน QR Code ดาวน์โหลด</div>
-                    <div style={{ fontSize: 11, color: textGray, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis" }}>
-                      ID: {imageId}
+                  {qrCodeUrl && (
+                    <div style={{ background: "#fff", padding: 10, borderRadius: 12, width: 100, height: 100 }}>
+                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrCodeUrl)}`} alt="QR Code" style={{ width: "100%", height: "100%" }} />
                     </div>
-                    <div style={{ fontSize: 11, color: "#10B981", fontWeight: 600, marginTop: 2 }}>
-                      สถานะ D1: completed
-                    </div>
+                  )}
+                  <div style={{ textAlign: "left", flex: 1, minWidth: 160 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 4 }}>สแกน QR Code เพื่อดาวน์โหลด</div>
+                    <div style={{ fontSize: 12, color: textGray, marginBottom: 12 }}>หรือกดบันทึกรูปภาพทางด้านบนได้โดยตรง</div>
+                    <a 
+                      href={resultUrl} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      style={{
+                        display: "inline-block", background: "transparent", border: `1px solid ${gold}`,
+                        color: gold, textDecoration: "none", padding: "8px 16px", borderRadius: 8,
+                        fontSize: 13, fontWeight: 700, transition: "background 0.2s"
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(212,175,55,0.1)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    >
+                      เปิดรูปภาพขนาดเต็ม ↗
+                    </a>
                   </div>
                 </div>
-
-                {/* Print button mock */}
-                <button
-                  onClick={() => alert(`ส่งรูป ${imageId} เข้าคิวพิมพ์ขนาด 4x6 สำเร็จ!`)}
-                  style={{
-                    marginTop: 20, width: "100%", maxWidth: 380, padding: "12px 0",
-                    background: "transparent", color: "#fff", border: `1px solid ${gold}`,
-                    borderRadius: 50, cursor: "pointer", fontWeight: 600, fontSize: 14,
-                    transition: "all 0.2s"
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(212,175,55,0.1)" }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}
-                >
-                  🖨️ ทดสอบส่งคำสั่งพิมพ์รูป (Print Mock)
-                </button>
               </div>
             ) : errorMsg ? (
               /* Error UI */
               <div style={{ textAlign: "center", padding: 20 }}>
-                <div style={{ fontSize: 50, marginBottom: 16 }}>⚠️</div>
-                <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 8px", color: "#EF4444" }}>
-                  เกิดข้อผิดพลาด
-                </h3>
-                <p style={{ fontSize: 14, color: textGray, margin: 0 }}>{errorMsg}</p>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+                <h3 style={{ fontSize: 18, fontWeight: 700, color: "#ff4d4d", margin: "0 0 8px" }}>เกิดข้อผิดพลาด</h3>
+                <p style={{ fontSize: 14, color: textGray, margin: "0 0 20px" }}>{errorMsg}</p>
+                <button
+                  onClick={handleGenerate}
+                  style={{
+                    background: gold, color: darkBg, border: "none", padding: "10px 24px",
+                    borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer"
+                  }}
+                >
+                  ลองใหม่อีกครั้ง
+                </button>
               </div>
             ) : (
-              /* Idle state */
+              /* Idle UI */
               <div style={{ textAlign: "center", padding: 20, color: textGray }}>
-                <div style={{ fontSize: 60, marginBottom: 20 }}>🎭</div>
-                <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 8px", color: "#fff" }}>
-                  หน้าจอพรีวิวผลลัพธ์
-                </h3>
-                <p style={{ fontSize: 14, maxWidth: 300, margin: 0, lineHeight: 1.6 }}>
-                  หลังจากคุณกดสั่งงาน แผงฝั่งซ้ายจะบันทึกข้อมูลและแสดงภาพความละเอียดสูงที่เจนสดจาก AI ฝั่งขวาตรงนี้ครับ
-                </p>
+                <div style={{ fontSize: 48, marginBottom: 16, color: "rgba(212,175,55,0.3)" }}>✨</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#fff", marginBottom: 6 }}>
+                  รอสั่งประมวลผลรูปภาพ
+                </div>
+                <div style={{ fontSize: 13 }}>
+                  เลือกรูปพื้นหลัง อัปโหลดหน้าของคุณ เลือกสไตล์ และกดสั่งเจนรูปทางฝั่งซ้ายได้เลยครับ
+                </div>
               </div>
             )}
           </div>
@@ -399,11 +440,11 @@ export default function Home() {
 
       {/* Footer */}
       <footer style={{
-        padding: "30px 40px", textAlign: "center", fontSize: 13, color: textGray,
-        borderTop: `1px solid ${borderColor}`, background: "rgba(22, 22, 22, 0.4)",
-        boxSizing: "border-box"
+        padding: "30px 40px", borderTop: `1px solid ${borderColor}`,
+        textAlign: "center", fontSize: 13, color: textGray,
+        background: "rgba(10, 10, 10, 0.9)"
       }}>
-        © {new Date().getFullYear()} AI SNAP Platform · พัฒนาด้วยเทคโนโลยี Cloudflare Edge & D1 Database
+        © 2026 AI SNAP Photobooth Project. Powered by Cloudflare D1 & R2 & Replicate.
       </footer>
     </div>
   );
