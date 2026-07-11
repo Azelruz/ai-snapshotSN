@@ -39,28 +39,29 @@ export async function GET(request: Request) {
     if (imageRecord.status === "pending" && replicateToken) {
       const generatedUrl = imageRecord.generatedUrl || "";
 
-      // ==========================================
-      // STAGE 1: เช็คสถานะการเจนพื้นหลังด้วย FLUX.1
-      // ==========================================
-      if (generatedUrl.startsWith("replicate_flux_")) {
-        const fluxPredId = generatedUrl.replace("replicate_flux_", "");
+      // =========================================================
+      // STAGE 1: เช็คสถานะการเจนพื้นหลังด้วย FLUX.1 หรือ SDXL Inpaint
+      // =========================================================
+      if (generatedUrl.startsWith("replicate_flux_") || generatedUrl.startsWith("replicate_inpaint_")) {
+        const isFlux = generatedUrl.startsWith("replicate_flux_");
+        const predId = generatedUrl.replace(isFlux ? "replicate_flux_" : "replicate_inpaint_", "");
         
         try {
-          console.log(`[Status API - Stage 1] Polling FLUX.1 prediction: ${fluxPredId}`);
-          const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${fluxPredId}`, {
+          console.log(`[Status API - Stage 1] Polling Stage 1 prediction (${isFlux ? 'FLUX' : 'Inpaint'}): ${predId}`);
+          const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${predId}`, {
             headers: { "Authorization": `Token ${replicateToken}` },
           });
 
           if (pollResponse.ok) {
             const pollData = await pollResponse.json() as { status: string; output?: string | string[] };
             const currentStatus = pollData.status;
-            console.log(`[Status API - Stage 1] FLUX.1 prediction ${fluxPredId} status: ${currentStatus}`);
+            console.log(`[Status API - Stage 1] Stage 1 prediction ${predId} status: ${currentStatus}`);
 
             if (currentStatus === "succeeded" && pollData.output) {
-              const fluxOutputUrl = Array.isArray(pollData.output) ? pollData.output[0] : pollData.output;
-              console.log(`[Status API - Stage 1] FLUX.1 Succeeded. Output URL: ${fluxOutputUrl}`);
+              const outputImageUrl = Array.isArray(pollData.output) ? pollData.output[0] : pollData.output;
+              console.log(`[Status API - Stage 1] Stage 1 Succeeded. Output URL: ${outputImageUrl}`);
 
-              // --- ทริกเกอร์ต่อ STAGE 2: สั่งสลับใบหน้าจริง (Face Swap) ลงบนตัวละครที่ FLUX เจนขึ้นมา ---
+              // --- ทริกเกอร์ต่อ STAGE 2: สั่งสลับใบหน้าจริง (Face Swap) ลงบนตัวละครที่ถูกวาดใหม่ ---
               console.log(`[Status API - Stage 2] Starting Face Swap...`);
               const faceSwapResponse = await fetch("https://api.replicate.com/v1/predictions", {
                 method: "POST",
@@ -71,7 +72,7 @@ export async function GET(request: Request) {
                 body: JSON.stringify({
                   version: "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
                   input: {
-                    input_image: fluxOutputUrl,
+                    input_image: outputImageUrl,
                     swap_image: imageRecord.originalUrl,
                   },
                 }),
@@ -96,8 +97,8 @@ export async function GET(request: Request) {
               imageRecord.status = "failed";
             }
           }
-        } catch (fluxError) {
-          console.error(`[Status API - Stage 1 Exception] Error:`, fluxError);
+        } catch (stage1Error) {
+          console.error(`[Status API - Stage 1 Exception] Error:`, stage1Error);
         }
       }
 
@@ -208,6 +209,7 @@ export async function GET(request: Request) {
 
     // 3. ส่งข้อมูลสถานะปัจจุบันกลับไปแสดงผลหน้าจอ
     const isTempPrefix = imageRecord.generatedUrl?.startsWith("replicate_flux_") || 
+                         imageRecord.generatedUrl?.startsWith("replicate_inpaint_") || 
                          imageRecord.generatedUrl?.startsWith("replicate_swap_") || 
                          imageRecord.generatedUrl?.startsWith("replicate_gfp_");
 

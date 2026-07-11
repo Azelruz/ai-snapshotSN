@@ -97,6 +97,7 @@ export async function POST(request: Request) {
     }
 
     const selectedTheme = themeName.toLowerCase();
+    const targetImageUrl = `${hostUrl}/templates/wedding_original.jpg`;
     let predictionId = "";
     let startPrefix = ""; // ระบุสถานะเริ่มต้นของ D1
 
@@ -104,8 +105,8 @@ export async function POST(request: Request) {
     if (replicateToken && uploadedFaceUrl) {
       try {
         if (selectedTheme === "wedding") {
-          // --- ธีมแต่งงาน: ข้าม Stage 1 เจนพื้นหลัง -> ไปรัน Stage 2 (Face Swap with Indexes) บนรูปจริงทันที ---
-          console.log(`[AI Wedding Index Swap] Requesting Targeted Face Swap on Replicate...`);
+          // --- ธีมแต่งงาน: ใช้ระบบ 2-Stage Pipeline (Stage 1: SDXL Inpaint วาดตัวแขกผู้ร่วมยินดีขึ้นมาใหม่) ---
+          console.log(`[AI Wedding Inpaint] Requesting SDXL Inpaint on Replicate...`);
           const predictionResponse = await fetch("https://api.replicate.com/v1/predictions", {
             method: "POST",
             headers: {
@@ -113,13 +114,15 @@ export async function POST(request: Request) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              version: "518f2116425c40acb5c234031c55daf843c1357eff784370fe9489e57b65c150",
+              version: "aca001c8b137114d5e594c68f7084ae6d82f364758aab8d997b233e8ef3c4d93",
               input: {
-                source_face_image: uploadedFaceUrl,
-                destination_image: `${hostUrl}/templates/wedding_original.jpg`,
-                source_face_index: 0,
-                destination_face_index: weddingTarget === "bride" ? 1 : 0,
-                execution_type: "face_swap"
+                image: targetImageUrl,
+                mask: `${hostUrl}/templates/wedding_mask.png`,
+                prompt: "a happy wedding guest smiling and celebrating, cheering for the bride and groom, formal wedding guest attire, looking at the camera, photorealistic, highly detailed, shot on 85mm lens, f/1.8, warm lighting",
+                negative_prompt: "deformed, ugly, bad anatomy, bad face, blurry, extra limbs, mutated hands, double head",
+                prompt_strength: 0.9,
+                num_inference_steps: 40,
+                guidance_scale: 8.0
               },
             }),
           });
@@ -127,11 +130,11 @@ export async function POST(request: Request) {
           if (predictionResponse.ok) {
             const prediction = await predictionResponse.json() as { id: string };
             predictionId = prediction.id;
-            startPrefix = "replicate_swap_"; // ส่งไม้ต่อเพื่อไปตรวจและส่งต่อให้ตาสอง (GFPGAN)
-            console.log(`[AI Wedding Index Swap] Prediction created with ID: ${predictionId}`);
+            startPrefix = "replicate_inpaint_"; // บันทึกสเตจแรกเพื่อนำส่งต่อไปสลับใบหน้าและจบที่ GFPGAN
+            console.log(`[AI Wedding Inpaint] SDXL Inpaint created with ID: ${predictionId}`);
           } else {
             const errBody = await predictionResponse.text();
-            console.error(`[AI Wedding Index Swap] Error: ${predictionResponse.status} - ${errBody}`);
+            console.error(`[AI Wedding Inpaint] Error: ${predictionResponse.status} - ${errBody}`);
           }
         } else {
           // --- ธีมทั่วไป: รัน Stage 1 (FLUX.1 Schnell) เพื่อเจนพื้นหลังคนใหม่ที่คมชัด สวยงาม ---
