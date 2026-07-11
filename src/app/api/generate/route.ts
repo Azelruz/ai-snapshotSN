@@ -5,10 +5,26 @@ import { eq } from "drizzle-orm";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { R2Bucket } from "@cloudflare/workers-types";
 
+// ฟังก์ชันจำลอง LLM ขยาย Prompt ให้ละเอียดและสวยงาม (Prompt Expansion)
+function expandPrompt(theme: string, userText: string): string {
+  const themeDetails: Record<string, string> = {
+    cyberpunk: "cinematic film still of a futuristic cyberpunk character, glowing neon cybernetic implants, dark synthwave cityscape background, detailed skin texture, dramatic blue and pink volumetric lighting, shot on 85mm lens, f/1.8, award-winning digital art, photorealistic",
+    pixar: "adorable 3D animated character in classic Pixar Disney style, soft warm studio lighting, highly detailed clay texture, vibrant friendly eyes, cheerful expression, 3D render, masterpiece, octane render, clean background",
+    luxury: "high-fashion editorial portrait, luxury fashion model, elegant black and gold wardrobe, premium studio lighting, dark rich gold reflections, sophisticated mood, shot on Hasselblad, 8k resolution, cinematic, masterpiece",
+    anime: "modern anime key visual, beautiful anime character, sharp lines, glowing detailed eyes, dramatic cinematic lighting, fantasy cherry blossom background, digital illustration, masterpiece, high quality"
+  };
+
+  const baseDetail = themeDetails[theme] || themeDetails.cyberpunk;
+  if (userText && userText.trim().length > 0) {
+    return `${userText}, styled as ${baseDetail}`;
+  }
+  return `a stunning professional portrait of a person, ${baseDetail}`;
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { themeName = "Cyberpunk", promptText, faceImageBase64 } = body;
+    const { themeName = "Cyberpunk", promptText = "", faceImageBase64 } = body;
 
     // 1. ดึง Cloudflare Context และ Bindings
     const context = getCloudflareContext();
@@ -80,26 +96,15 @@ export async function POST(request: Request) {
       }
     }
 
-    // รายการภาพต้นแบบของแต่ละธีมที่จะใช้สลับใบหน้าจริงเข้าไปใส่ (Target templates)
-    const themeTemplates: Record<string, string> = {
-      cyberpunk: "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=1024", 
-      pixar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1024", 
-      wedding: `${hostUrl}/templates/wedding_original.jpg`, // ใช้รูปแต่งงานจริงของคุณ
-      anime: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1024", 
-      luxury: "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=1024", 
-    };
-
     const selectedTheme = themeName.toLowerCase();
-    const targetImageUrl = themeTemplates[selectedTheme] || themeTemplates.cyberpunk;
-
     let predictionId = "";
+    let startPrefix = ""; // ระบุสถานะเริ่มต้นของ D1
 
-    // 4. สั่งเริ่มประมวลผลรูปภาพบน Replicate API แบบด่วน (Edge API Request)
+    // 4. สั่งเริ่มประมวลผลรูปภาพบน Replicate API
     if (replicateToken && uploadedFaceUrl) {
       try {
         if (selectedTheme === "wedding") {
-          // --- ธีมแต่งงาน: ใช้โมเดลพิเศษที่สามารถเจาะจงใบหน้า (Face Swap with Indexes) ---
-          // สลับใบหน้าของคุณลงเฉพาะ 'แขกผู้ชายเสื้อเชิ้ตสีขาวฝั่งซ้ายสุด' (Index 0) และปล่อยให้บ่าวสาวหน้าเดิม 100%
+          // --- ธีมแต่งงาน: ข้าม Stage 1 เจนพื้นหลัง -> ไปรัน Stage 2 (Face Swap with Indexes) บนรูปจริงทันที ---
           console.log(`[AI Wedding Index Swap] Requesting Targeted Face Swap on Replicate...`);
           const predictionResponse = await fetch("https://api.replicate.com/v1/predictions", {
             method: "POST",
@@ -108,13 +113,12 @@ export async function POST(request: Request) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              // mertguvencli/face-swap-with-indexes model version
               version: "518f2116425c40acb5c234031c55daf843c1357eff784370fe9489e57b65c150",
               input: {
-                source_face_image: uploadedFaceUrl,    // หน้าของผู้ใช้งาน
-                destination_image: targetImageUrl,     // รูปบ่าวสาวและแขกเสื้อขาว
+                source_face_image: uploadedFaceUrl,
+                destination_image: `${hostUrl}/templates/wedding_original.jpg`,
                 source_face_index: 0,
-                destination_face_index: 0,              // ดัชนีหน้า 0 คือหน้าแขกที่อยู่ฝั่งซ้ายสุดของรูป
+                destination_face_index: 0,
                 execution_type: "face_swap"
               },
             }),
@@ -123,14 +127,17 @@ export async function POST(request: Request) {
           if (predictionResponse.ok) {
             const prediction = await predictionResponse.json() as { id: string };
             predictionId = prediction.id;
+            startPrefix = "replicate_swap_"; // ส่งไม้ต่อเพื่อไปตรวจและส่งต่อให้ตาสอง (GFPGAN)
             console.log(`[AI Wedding Index Swap] Prediction created with ID: ${predictionId}`);
           } else {
             const errBody = await predictionResponse.text();
             console.error(`[AI Wedding Index Swap] Error: ${predictionResponse.status} - ${errBody}`);
           }
         } else {
-          // --- ธีมอื่นๆ: ใช้การสลับหน้าตรงปกติ (Direct Face Swap) ---
-          console.log(`[AI Replicate] Requesting face swap prediction creation on Replicate...`);
+          // --- ธีมทั่วไป: รัน Stage 1 (FLUX.1 Schnell) เพื่อเจนพื้นหลังคนใหม่ที่คมชัด สวยงาม ---
+          const detailedPrompt = expandPrompt(selectedTheme, promptText);
+          console.log(`[AI FLUX.1] Creating backdrop image with prompt: "${detailedPrompt}"`);
+          
           const predictionResponse = await fetch("https://api.replicate.com/v1/predictions", {
             method: "POST",
             headers: {
@@ -138,10 +145,13 @@ export async function POST(request: Request) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              version: "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
+              // black-forest-labs/flux-schnell model version
+              version: "f20dfaa77e6d9275e192c0211516e917dcb6546376abd2e088191295325881cf",
               input: {
-                input_image: targetImageUrl,
-                swap_image: uploadedFaceUrl,
+                prompt: detailedPrompt,
+                aspect_ratio: "1:1",
+                num_outputs: 1,
+                output_format: "jpg"
               },
             }),
           });
@@ -149,10 +159,11 @@ export async function POST(request: Request) {
           if (predictionResponse.ok) {
             const prediction = await predictionResponse.json() as { id: string };
             predictionId = prediction.id;
-            console.log(`[AI Replicate] Face swap prediction created successfully with ID: ${predictionId}`);
+            startPrefix = "replicate_flux_"; // ส่งไม้ต่อเข้ารันสเตจ FLUX ก่อน
+            console.log(`[AI FLUX.1] Prediction created successfully with ID: ${predictionId}`);
           } else {
             const errBody = await predictionResponse.text();
-            console.error(`[AI Replicate] Error creating prediction: ${predictionResponse.status} - ${errBody}`);
+            console.error(`[AI FLUX.1] Error creating prediction: ${predictionResponse.status} - ${errBody}`);
           }
         }
       } catch (err) {
@@ -166,12 +177,12 @@ export async function POST(request: Request) {
         id: imageId,
         eventId: eventId,
         originalUrl: uploadedFaceUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
-        generatedUrl: `replicate_pred_${predictionId}`,
+        generatedUrl: `${startPrefix}${predictionId}`,
         qrCode: qrCodeUrl,
         status: "pending",
         createdAt: new Date(),
       });
-      console.log(`[D1 Database] Saved pending image ${imageId} referencing prediction ${predictionId}`);
+      console.log(`[D1 Database] Saved pending image ${imageId} referencing prediction ${startPrefix}${predictionId}`);
     } else {
       // --- FALLBACK PATH: หากเรียก Replicate ไม่สำเร็จ ให้ใช้งานของฟรี Pollinations.ai ---
       console.log("[AI Fallback] No Replicate prediction created. Falling back to Pollinations.ai...");
@@ -188,19 +199,7 @@ export async function POST(request: Request) {
 
       const runPollinationsFallback = async () => {
         try {
-          const themePrompts: Record<string, string> = {
-            cyberpunk: "cyberpunk avatar style, futuristic neon lights, dark synthwave background, high tech cybernetics, digital art",
-            pixar: "cute 3D animated character, pixar disney style, vibrant colors, soft lighting, friendly expression, high quality render",
-            wedding: "royal wedding theme, elegant attire, soft warm lighting, luxury gold accents, floral background, classic portrait",
-            anime: "modern anime key visual style, sharp lines, beautiful eyes, dramatic lighting, fantasy background",
-            luxury: "luxury fashion model portrait, high-end studio lighting, elegant gold and black tones, premium feel",
-          };
-
-          const baseThemePrompt = themePrompts[selectedTheme] || themePrompts.cyberpunk;
-          const finalPrompt = promptText 
-            ? `${promptText}, ${baseThemePrompt}`
-            : `portrait photo of a beautiful person, ${baseThemePrompt}, masterpiece, highly detailed, 8k resolution`;
-
+          const finalPrompt = expandPrompt(selectedTheme, promptText);
           const randomSeed = Math.floor(Math.random() * 1000000);
           const pollinationsUrl = `https://image.pollinations.ai/p/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&seed=${randomSeed}&nologo=true`;
 
