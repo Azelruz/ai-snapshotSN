@@ -5,6 +5,14 @@ import { eq } from "drizzle-orm";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { R2Bucket } from "@cloudflare/workers-types";
 
+const THEME_STYLES: Record<string, string> = {
+  cyberpunk: "styled as a futuristic cyberpunk character, glowing neon cybernetic implants, dark synthwave cityscape background, detailed skin texture, dramatic blue and pink volumetric lighting, f/1.8, photorealistic",
+  pixar: "styled as an adorable 3D animated character in classic Pixar Disney style, soft warm studio lighting, highly detailed clay texture, vibrant friendly eyes, cheerful expression, 3D render, octane render, clean background",
+  luxury: "styled as a high-fashion luxury editorial portrait, elegant black and gold wardrobe, premium studio lighting, dark rich gold reflections, sophisticated mood, shot on Hasselblad",
+  anime: "styled as a modern anime key visual, beautiful anime character, sharp lines, glowing detailed eyes, dramatic cinematic lighting, fantasy cherry blossom background, digital illustration",
+  wedding: "styled as a romantic royal wedding portrait, elegant formal wedding attire, soft golden hour sunlight, luxury gold accents, beautiful floral wedding ceremony background, shallow depth of field, f/1.4, photorealistic"
+};
+
 // ฟังก์ชันสำหรับเลือกและประมวลผลคำสั่งระบบตามแต่ละธีมและประยุกต์ใช้ Reference Image ของผู้ใช้
 function getThemePrompt(theme: string, userText: string): string {
   const themeDetails: Record<string, string> = {
@@ -121,6 +129,11 @@ export async function POST(request: Request) {
           finalPrompt = getThemePrompt(selectedTheme, promptText);
           console.log(`[AI GPT Image 2] Using fallback theme prompt: "${finalPrompt}"`);
         }
+
+        // นำแนวภาพที่เลือกมาต่อท้าย Prompt (เมื่อเลือกแนวภาพ ให้เพิ่มแนวภาพเข้าไปใน prompt)
+        const themeStyle = THEME_STYLES[selectedTheme] || THEME_STYLES.cyberpunk;
+        finalPrompt = `${finalPrompt}, ${themeStyle}`;
+        console.log(`[AI GPT Image 2] Combined Prompt with selected style: "${finalPrompt}"`);
         
         // กำหนดอาร์เรย์รูปภาพอ้างอิง (input_images)
         const inputImages: string[] = [];
