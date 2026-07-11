@@ -5,20 +5,21 @@ import { eq } from "drizzle-orm";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { R2Bucket } from "@cloudflare/workers-types";
 
-// ฟังก์ชันจำลอง LLM ขยาย Prompt ให้ละเอียดและสวยงาม (Prompt Expansion)
-function expandPrompt(theme: string, userText: string): string {
+// ฟังก์ชันสำหรับเลือกและประมวลผลคำสั่งระบบตามแต่ละธีมและประยุกต์ใช้ Reference Image ของผู้ใช้
+function getThemePrompt(theme: string, userText: string): string {
   const themeDetails: Record<string, string> = {
-    cyberpunk: "cinematic film still of a futuristic cyberpunk character, glowing neon cybernetic implants, dark synthwave cityscape background, detailed skin texture, dramatic blue and pink volumetric lighting, shot on 85mm lens, f/1.8, award-winning digital art, photorealistic",
-    pixar: "adorable 3D animated character in classic Pixar Disney style, soft warm studio lighting, highly detailed clay texture, vibrant friendly eyes, cheerful expression, 3D render, masterpiece, octane render, clean background",
-    luxury: "high-fashion editorial portrait, luxury fashion model, elegant black and gold wardrobe, premium studio lighting, dark rich gold reflections, sophisticated mood, shot on Hasselblad, 8k resolution, cinematic, masterpiece",
-    anime: "modern anime key visual, beautiful anime character, sharp lines, glowing detailed eyes, dramatic cinematic lighting, fantasy cherry blossom background, digital illustration, masterpiece, high quality"
+    cyberpunk: "A high-quality photo. Generate a futuristic cyberpunk character based on the face and likeness of the person in the reference image. Glowing neon cybernetic implants, dark synthwave cityscape background, detailed skin texture, dramatic blue and pink volumetric lighting, shot on 85mm lens, f/1.8, photorealistic, masterpiece",
+    pixar: "A high-quality 3D render. Generate a cute 3D animated character in classic Pixar Disney style based on the face and likeness of the person in the reference image. Soft warm studio lighting, highly detailed clay texture, vibrant friendly eyes, cheerful expression, masterpiece, clean background",
+    luxury: "A high-quality fashion portrait. Generate a luxury fashion model based on the face and likeness of the person in the reference image. Elegant black and gold wardrobe, premium studio lighting, dark rich gold reflections, sophisticated mood, shot on Hasselblad, 8k resolution, cinematic, masterpiece",
+    anime: "A high-quality anime key visual. Generate a beautiful anime character based on the face and likeness of the person in the reference image. Sharp lines, glowing detailed eyes, dramatic cinematic lighting, fantasy cherry blossom background, digital illustration, masterpiece",
+    wedding: "A high-quality photo. Take the person from the second reference image and place them naturally into the first wedding reference image next to the bride and groom, smiling and celebrating, showing congratulations, matching the style, lighting, and composition of the wedding photo perfectly, photorealistic, 8k resolution, shot on 85mm lens, masterpiece"
   };
 
   const baseDetail = themeDetails[theme] || themeDetails.cyberpunk;
   if (userText && userText.trim().length > 0) {
-    return `${userText}, styled as ${baseDetail}`;
+    return `${userText}, ${baseDetail}`;
   }
-  return `a stunning professional portrait of a person, ${baseDetail}`;
+  return baseDetail;
 }
 
 export async function POST(request: Request) {
@@ -99,66 +100,57 @@ export async function POST(request: Request) {
     const selectedTheme = themeName.toLowerCase();
     let predictionId = "";
 
-    // 4. สั่งเริ่มประมวลผลรูปภาพบน Replicate API
+    // 4. เรียกใช้งานโมเดล gpt-image-2 บน Replicate เพื่อสร้างภาพ (ไม่มี Face Swap)
     if (replicateToken) {
       try {
-        if (selectedTheme === "wedding" && uploadedFaceUrl) {
-          // --- ธีมแต่งงาน: สลับใบหน้าแขกที่อัปโหลด เข้ามาในรูป 3 คน (สลับตัวแขกเสื้อขาวฝั่งซ้าย Index 0) ---
-          console.log(`[AI Wedding Index Swap] Requesting Targeted Face Swap on Replicate...`);
-          const predictionResponse = await fetch("https://api.replicate.com/v1/predictions", {
-            method: "POST",
-            headers: {
-              "Authorization": `Token ${replicateToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              version: "518f2116425c40acb5c234031c55daf843c1357eff784370fe9489e57b65c150",
-              input: {
-                source_face_image: uploadedFaceUrl,
-                destination_image: `${hostUrl}/templates/wedding_original.jpg`, // ใช้รูป 3 คนที่เรากู้คืนมาแล้ว
-                source_face_index: 0,
-                destination_face_index: 0, // สลับหน้าแขกเสื้อขาวฝั่งซ้ายสุด
-                execution_type: "face_swap"
-              },
-            }),
-          });
+        const finalPrompt = getThemePrompt(selectedTheme, promptText);
+        
+        // กำหนดอาร์เรย์รูปภาพอ้างอิง (input_images)
+        const inputImages: string[] = [];
+        let reqAspectRatio = "1:1";
 
-          if (predictionResponse.ok) {
-            const prediction = await predictionResponse.json() as { id: string };
-            predictionId = prediction.id;
-            console.log(`[AI Wedding Index Swap] Prediction created successfully with ID: ${predictionId}`);
-          } else {
-            const errBody = await predictionResponse.text();
-            console.error(`[AI Wedding Index Swap] Error: ${predictionResponse.status} - ${errBody}`);
+        if (selectedTheme === "wedding") {
+          // ธีมแต่งงาน: ใช้ 2 รูป [รูปพื้นหลังบ่าวสาว, รูปใบหน้าแขกที่อัปโหลดเข้ามา]
+          const targetImageUrl = `${hostUrl}/templates/wedding_original.jpg`;
+          inputImages.push(targetImageUrl);
+          if (uploadedFaceUrl) {
+            inputImages.push(uploadedFaceUrl);
           }
+          reqAspectRatio = "3:2"; // กำหนดสัดส่วนตามรูปคู่แต่งงานเริ่มต้น
         } else {
-          // --- ธีมทั่วไป: เจนรูปโดยตรงจาก Prompt ด้วย gpt-image-2 ---
-          const detailedPrompt = expandPrompt(selectedTheme, promptText);
-          console.log(`[AI GPT Image 2] Creating image directly with prompt: "${detailedPrompt}"`);
-          
-          const predictionResponse = await fetch("https://api.replicate.com/v1/models/openai/gpt-image-2/predictions", {
-            method: "POST",
-            headers: {
-              "Authorization": `Token ${replicateToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              input: {
-                prompt: detailedPrompt,
-                aspect_ratio: "1:1",
-                num_outputs: 1
-              },
-            }),
-          });
-
-          if (predictionResponse.ok) {
-            const prediction = await predictionResponse.json() as { id: string };
-            predictionId = prediction.id;
-            console.log(`[AI GPT Image 2] Prediction created successfully with ID: ${predictionId}`);
-          } else {
-            const errBody = await predictionResponse.text();
-            console.error(`[AI GPT Image 2] Error creating prediction: ${predictionResponse.status} - ${errBody}`);
+          // ธีมทั่วไป: ใช้ 1 รูป [รูปใบหน้าผู้ใช้ที่อัปโหลดเข้ามา] เพื่อให้ AI เจนฉากใหม่ตามสไตล์โดยเลียนหน้าตาคุณ
+          if (uploadedFaceUrl) {
+            inputImages.push(uploadedFaceUrl);
           }
+        }
+
+        console.log(`[AI GPT Image 2] Generating image for theme ${selectedTheme}`);
+        console.log(`[AI GPT Image 2] Prompt: "${finalPrompt}"`);
+        console.log(`[AI GPT Image 2] Reference Images:`, inputImages);
+
+        const predictionResponse = await fetch("https://api.replicate.com/v1/models/openai/gpt-image-2/predictions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Token ${replicateToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            input: {
+              prompt: finalPrompt,
+              aspect_ratio: reqAspectRatio,
+              num_outputs: 1,
+              ...(inputImages.length > 0 ? { input_images: inputImages } : {})
+            },
+          }),
+        });
+
+        if (predictionResponse.ok) {
+          const prediction = await predictionResponse.json() as { id: string };
+          predictionId = prediction.id;
+          console.log(`[AI GPT Image 2] Prediction created successfully with ID: ${predictionId}`);
+        } else {
+          const errBody = await predictionResponse.text();
+          console.error(`[AI GPT Image 2] Error creating prediction: ${predictionResponse.status} - ${errBody}`);
         }
       } catch (err) {
         console.error(`[AI Replicate] Exception during prediction request:`, err);
@@ -193,7 +185,7 @@ export async function POST(request: Request) {
 
       const runPollinationsFallback = async () => {
         try {
-          const finalPrompt = expandPrompt(selectedTheme, promptText);
+          const finalPrompt = getThemePrompt(selectedTheme, promptText);
           const randomSeed = Math.floor(Math.random() * 1000000);
           const pollinationsUrl = `https://image.pollinations.ai/p/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&seed=${randomSeed}&nologo=true`;
 
