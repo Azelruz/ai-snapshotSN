@@ -25,14 +25,41 @@ export default function Home() {
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Base Photos Config
-  const basePhotos = [
-    { id: "wedding", name: "คู่บ่าวสาววิวาห์", url: "/templates/wedding_original.jpg" },
-    { id: "cyberpunk", name: "เมืองไซเบอร์", url: "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600" },
-    { id: "pixar", name: "ห้องของเล่น", url: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600" },
-    { id: "anime", name: "แฟนตาซีญี่ปุ่น", url: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600" },
-    { id: "luxury", name: "แฟชั่นสตูดิโอ", url: "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=600" }
+  interface BasePhoto {
+    id: string;
+    name: string;
+    imageUrl: string;
+    prompt?: string;
+    aspectRatio?: string;
+  }
+
+  // Base Photos Config (Default Hardcoded Fallbacks)
+  const defaultBasePhotos: BasePhoto[] = [
+    { id: "temp_wedding", name: "คู่บ่าวสาววิวาห์", imageUrl: "/templates/wedding_original.jpg" },
+    { id: "temp_cyberpunk", name: "เมืองไซเบอร์", imageUrl: "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600" },
+    { id: "temp_pixar", name: "ห้องของเล่น", imageUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600" },
+    { id: "temp_anime", name: "แฟนตาซีญี่ปุ่น", imageUrl: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600" },
+    { id: "temp_luxury", name: "แฟชั่นสตูดิโอ", imageUrl: "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=600" }
   ];
+  const [basePhotos, setBasePhotos] = useState<BasePhoto[]>(defaultBasePhotos);
+
+  // Fetch templates dynamically from backend
+  useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        const res = await fetch("/api/templates");
+        const data = await res.json();
+        if (data.success && data.templates.length > 0) {
+          setBasePhotos(data.templates);
+          // Set default base photo to the first item from D1
+          setSelectedBasePhoto(data.templates[0].imageUrl);
+        }
+      } catch (err) {
+        console.error("Error loading templates from D1:", err);
+      }
+    };
+    loadTemplates();
+  }, []);
 
   // Themes Config
   const themes = [
@@ -153,8 +180,22 @@ export default function Home() {
         background: "rgba(22, 22, 22, 0.8)", backdropFilter: "blur(12px)",
         position: "sticky", top: 0, zIndex: 10
       }}>
-        <div style={{ fontWeight: 800, fontSize: 24, letterSpacing: "-0.04em" }}>
-          AI<span style={{ color: gold }}>SNAP</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+          <div style={{ fontWeight: 800, fontSize: 24, letterSpacing: "-0.04em" }}>
+            AI<span style={{ color: gold }}>SNAP</span>
+          </div>
+          <a 
+            href="/admin" 
+            style={{
+              background: "rgba(212,175,55,0.1)", border: `1px solid ${gold}`,
+              color: gold, borderRadius: 8, padding: "6px 14px", fontSize: 12,
+              fontWeight: 700, textDecoration: "none", transition: "background 0.2s"
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(212,175,55,0.2)"}
+            onMouseLeave={e => e.currentTarget.style.background = "rgba(212,175,55,0.1)"}
+          >
+            ⚙️ จัดการรูปพื้นฐาน & Prompts
+          </a>
         </div>
         <div style={{
           background: "rgba(212,175,55,0.1)", border: `1px solid ${gold}`,
@@ -199,14 +240,14 @@ export default function Home() {
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
                 {basePhotos.map(bp => {
-                  const isSelected = selectedBasePhoto === bp.url || (bp.id === "wedding" && selectedBasePhoto.includes("wedding"));
+                  const isSelected = selectedBasePhoto === bp.imageUrl || (bp.id?.includes("wedding") && selectedBasePhoto.includes("wedding"));
                   return (
                     <div
                       key={bp.id}
                       onClick={() => {
-                        setSelectedBasePhoto(bp.id === "wedding" ? "/templates/wedding_original.jpg" : bp.url);
+                        setSelectedBasePhoto(bp.imageUrl);
                         // อัปเดตธีมเริ่มต้นให้เข้าคู่เพื่อความลื่นไหล
-                        if (bp.id === "wedding") {
+                        if (bp.id?.includes("wedding") || bp.imageUrl.includes("wedding")) {
                           setSelectedTheme("wedding");
                         }
                       }}
@@ -217,7 +258,7 @@ export default function Home() {
                       }}
                     >
                       <img 
-                        src={bp.id === "wedding" ? "/templates/wedding_original.jpg" : bp.url} 
+                        src={bp.imageUrl} 
                         alt={bp.name} 
                         style={{ width: "100%", height: "100%", objectFit: "cover" }} 
                       />

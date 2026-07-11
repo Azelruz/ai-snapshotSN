@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { images, events, users } from "@/db/schema";
+import { images, events, users, templates } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { R2Bucket } from "@cloudflare/workers-types";
@@ -103,17 +103,28 @@ export async function POST(request: Request) {
     // 4. เรียกใช้งานโมเดล gpt-image-2 บน Replicate เพื่อสร้างภาพ (ไม่มี Face Swap)
     if (replicateToken) {
       try {
-        const finalPrompt = getThemePrompt(selectedTheme, promptText);
-        
-        // กำหนดอาร์เรย์รูปภาพอ้างอิง (input_images)
-        const inputImages: string[] = [];
-        let reqAspectRatio = "1:1";
-
         // กำหนดรูปพื้นหลังเริ่มต้น (ดีฟอลต์เป็นรูปแต่งงานหากไม่ได้ระบุมา)
         let resolvedBaseUrl = basePhotoUrl || `${hostUrl}/templates/wedding_original.jpg`;
         if (resolvedBaseUrl.startsWith("/")) {
           resolvedBaseUrl = `${hostUrl}${resolvedBaseUrl}`;
         }
+
+        // ค้นหา Prompt ล่าสุดจากฐานข้อมูล D1
+        let finalPrompt = "";
+        const cleanBaseUrl = basePhotoUrl || "/templates/wedding_original.jpg";
+        const templateDb = await db.select().from(templates).where(eq(templates.imageUrl, cleanBaseUrl)).limit(1);
+
+        if (templateDb.length > 0 && templateDb[0].prompt) {
+          finalPrompt = templateDb[0].prompt;
+          console.log(`[AI GPT Image 2] Found custom prompt from database for template: "${finalPrompt}"`);
+        } else {
+          finalPrompt = getThemePrompt(selectedTheme, promptText);
+          console.log(`[AI GPT Image 2] Using fallback theme prompt: "${finalPrompt}"`);
+        }
+        
+        // กำหนดอาร์เรย์รูปภาพอ้างอิง (input_images)
+        const inputImages: string[] = [];
+        let reqAspectRatio = "1:1";
         
         inputImages.push(resolvedBaseUrl);
 
@@ -122,13 +133,13 @@ export async function POST(request: Request) {
           inputImages.push(uploadedFaceUrl);
         }
 
-        // หากรูปพื้นหลังหลักเป็นรูปแต่งงาน กำหนดสัดส่วน 3:2 นอกนั้น 1:1
-        if (resolvedBaseUrl.includes("wedding")) {
+        // หากรูปพื้นหลังหลักหรือเทมเพลตมีสัดส่วนเฉพาะแบบแต่งงาน
+        if (resolvedBaseUrl.includes("wedding") || (templateDb.length > 0 && templateDb[0].aspectRatio === "3:2")) {
           reqAspectRatio = "3:2";
         }
 
         console.log(`[AI GPT Image 2] Generating image for theme ${selectedTheme}`);
-        console.log(`[AI GPT Image 2] Prompt: "${finalPrompt}"`);
+        console.log(`[AI GPT Image 2] Final Prompt: "${finalPrompt}"`);
         console.log(`[AI GPT Image 2] Reference Images:`, inputImages);
 
         const predictionResponse = await fetch("https://api.replicate.com/v1/models/openai/gpt-image-2/predictions", {

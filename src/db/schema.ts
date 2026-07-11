@@ -116,3 +116,13 @@ export const printers = sqliteTable('printer', {
   name: text('name').notNull(),
   queueStatus: text('queueStatus').default('idle'), // 'idle', 'printing', 'offline'
 });
+
+// --- Dynamic Base Photo Templates Table ---
+export const templates = sqliteTable('template', {
+  id: text('id').notNull().primaryKey(),
+  name: text('name').notNull(),
+  imageUrl: text('imageUrl').notNull(),
+  prompt: text('prompt').notNull(),
+  aspectRatio: text('aspectRatio').default('1:1'),
+  createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
+});
