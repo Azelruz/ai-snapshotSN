@@ -11,8 +11,7 @@ function expandPrompt(theme: string, userText: string): string {
     cyberpunk: "cinematic film still of a futuristic cyberpunk character, glowing neon cybernetic implants, dark synthwave cityscape background, detailed skin texture, dramatic blue and pink volumetric lighting, shot on 85mm lens, f/1.8, award-winning digital art, photorealistic",
     pixar: "adorable 3D animated character in classic Pixar Disney style, soft warm studio lighting, highly detailed clay texture, vibrant friendly eyes, cheerful expression, 3D render, masterpiece, octane render, clean background",
     luxury: "high-fashion editorial portrait, luxury fashion model, elegant black and gold wardrobe, premium studio lighting, dark rich gold reflections, sophisticated mood, shot on Hasselblad, 8k resolution, cinematic, masterpiece",
-    anime: "modern anime key visual, beautiful anime character, sharp lines, glowing detailed eyes, dramatic cinematic lighting, fantasy cherry blossom background, digital illustration, masterpiece, high quality",
-    wedding: "romantic royal wedding portrait of a beautiful bride and handsome groom, elegant formal wedding attire, soft golden hour sunlight, luxury gold accents, beautiful floral wedding ceremony background, shallow depth of field, shot on 85mm lens, f/1.4, photorealistic, cinematic, masterpiece"
+    anime: "modern anime key visual, beautiful anime character, sharp lines, glowing detailed eyes, dramatic cinematic lighting, fantasy cherry blossom background, digital illustration, masterpiece, high quality"
   };
 
   const baseDetail = themeDetails[theme] || themeDetails.cyberpunk;
@@ -100,47 +99,79 @@ export async function POST(request: Request) {
     const selectedTheme = themeName.toLowerCase();
     let predictionId = "";
 
-    // 4. เรียกใช้งานโมเดล gpt-image-2 บน Replicate เพื่อสร้างภาพโดยตรงจากข้อความ Prompt ทันที (ไม่ทำ Face Swap)
+    // 4. สั่งเริ่มประมวลผลรูปภาพบน Replicate API
     if (replicateToken) {
       try {
-        const detailedPrompt = expandPrompt(selectedTheme, promptText);
-        console.log(`[AI GPT Image 2] Creating image directly with prompt: "${detailedPrompt}"`);
-        
-        const predictionResponse = await fetch("https://api.replicate.com/v1/models/openai/gpt-image-2/predictions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Token ${replicateToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            input: {
-              prompt: detailedPrompt,
-              aspect_ratio: "1:1",
-              num_outputs: 1
+        if (selectedTheme === "wedding" && uploadedFaceUrl) {
+          // --- ธีมแต่งงาน: สลับใบหน้าแขกที่อัปโหลด เข้ามาในรูป 3 คน (สลับตัวแขกเสื้อขาวฝั่งซ้าย Index 0) ---
+          console.log(`[AI Wedding Index Swap] Requesting Targeted Face Swap on Replicate...`);
+          const predictionResponse = await fetch("https://api.replicate.com/v1/predictions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Token ${replicateToken}`,
+              "Content-Type": "application/json",
             },
-          }),
-        });
+            body: JSON.stringify({
+              version: "518f2116425c40acb5c234031c55daf843c1357eff784370fe9489e57b65c150",
+              input: {
+                source_face_image: uploadedFaceUrl,
+                destination_image: `${hostUrl}/templates/wedding_original.jpg`, // ใช้รูป 3 คนที่เรากู้คืนมาแล้ว
+                source_face_index: 0,
+                destination_face_index: 0, // สลับหน้าแขกเสื้อขาวฝั่งซ้ายสุด
+                execution_type: "face_swap"
+              },
+            }),
+          });
 
-        if (predictionResponse.ok) {
-          const prediction = await predictionResponse.json() as { id: string };
-          predictionId = prediction.id;
-          console.log(`[AI GPT Image 2] Prediction created successfully with ID: ${predictionId}`);
+          if (predictionResponse.ok) {
+            const prediction = await predictionResponse.json() as { id: string };
+            predictionId = prediction.id;
+            console.log(`[AI Wedding Index Swap] Prediction created successfully with ID: ${predictionId}`);
+          } else {
+            const errBody = await predictionResponse.text();
+            console.error(`[AI Wedding Index Swap] Error: ${predictionResponse.status} - ${errBody}`);
+          }
         } else {
-          const errBody = await predictionResponse.text();
-          console.error(`[AI GPT Image 2] Error creating prediction: ${predictionResponse.status} - ${errBody}`);
+          // --- ธีมทั่วไป: เจนรูปโดยตรงจาก Prompt ด้วย gpt-image-2 ---
+          const detailedPrompt = expandPrompt(selectedTheme, promptText);
+          console.log(`[AI GPT Image 2] Creating image directly with prompt: "${detailedPrompt}"`);
+          
+          const predictionResponse = await fetch("https://api.replicate.com/v1/models/openai/gpt-image-2/predictions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Token ${replicateToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              input: {
+                prompt: detailedPrompt,
+                aspect_ratio: "1:1",
+                num_outputs: 1
+              },
+            }),
+          });
+
+          if (predictionResponse.ok) {
+            const prediction = await predictionResponse.json() as { id: string };
+            predictionId = prediction.id;
+            console.log(`[AI GPT Image 2] Prediction created successfully with ID: ${predictionId}`);
+          } else {
+            const errBody = await predictionResponse.text();
+            console.error(`[AI GPT Image 2] Error creating prediction: ${predictionResponse.status} - ${errBody}`);
+          }
         }
       } catch (err) {
         console.error(`[AI Replicate] Exception during prediction request:`, err);
       }
     }
 
-    // 5. บันทึกข้อมูลลง D1 และรอพูลลิ่งผลลัพธ์ด่านเดียว (Single-Stage)
+    // 5. บันทึกข้อมูลลง D1
     if (predictionId) {
       await db.insert(images).values({
         id: imageId,
         eventId: eventId,
         originalUrl: uploadedFaceUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
-        generatedUrl: `replicate_pred_${predictionId}`, // ตั้งค่า Prefix ไปหาตัวพูลลิ่งด่านเดียวจบ
+        generatedUrl: `replicate_pred_${predictionId}`,
         qrCode: qrCodeUrl,
         status: "pending",
         createdAt: new Date(),
