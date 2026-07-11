@@ -12,7 +12,7 @@ function getThemePrompt(theme: string, userText: string): string {
     pixar: "A high-quality 3D render. Generate a cute 3D animated character in classic Pixar Disney style based on the face and likeness of the person in the reference image. Soft warm studio lighting, highly detailed clay texture, vibrant friendly eyes, cheerful expression, masterpiece, clean background",
     luxury: "A high-quality fashion portrait. Generate a luxury fashion model based on the face and likeness of the person in the reference image. Elegant black and gold wardrobe, premium studio lighting, dark rich gold reflections, sophisticated mood, shot on Hasselblad, 8k resolution, cinematic, masterpiece",
     anime: "A high-quality anime key visual. Generate a beautiful anime character based on the face and likeness of the person in the reference image. Sharp lines, glowing detailed eyes, dramatic cinematic lighting, fantasy cherry blossom background, digital illustration, masterpiece",
-    wedding: "A high-quality photo. Take the person from the second reference image and place them naturally into the first wedding reference image next to the bride and groom, smiling and celebrating, showing congratulations, matching the style, lighting, and composition of the wedding photo perfectly, photorealistic, 8k resolution, shot on 85mm lens, masterpiece"
+    wedding: "Add the person in this photo (reference image 2) to join in expressing congratulations in the wedding photo (reference image 1), matching the style, lighting, and composition of the wedding photo perfectly, photorealistic, 8k resolution, shot on 85mm lens, masterpiece"
   };
 
   const baseDetail = themeDetails[theme] || themeDetails.cyberpunk;
